@@ -6,6 +6,7 @@
 <title>ГеоУгадайка</title>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <style>
 :root{--bg:#0f1720;--panel:#17222e;--text:#e8eef4;--muted:#93a4b5;--accent:#2fbf71;--accent2:#f5b83d;--bad:#e05656;--me:#e8453c;--op:#3d7bf5}
 *{box-sizing:border-box}
@@ -34,6 +35,10 @@ label:first-child{margin-top:0}
 #hud{position:absolute;top:10px;left:10px;display:flex;gap:8px;z-index:5;flex-wrap:wrap;max-width:calc(100% - 80px)}
 #compass{position:absolute;top:10px;right:12px;z-index:5;width:68px;height:68px;cursor:pointer;filter:drop-shadow(0 2px 6px #0008)}
 #compassRose{width:100%;height:100%;overflow:visible}
+#skipBtn{position:absolute;top:88px;right:12px;z-index:5;padding:8px 12px;font-size:14px;background:#000a;color:#fff}
+#swapBox{position:absolute;top:60px;left:50%;transform:translateX(-50%);z-index:6;background:var(--panel);padding:14px 18px;border-radius:14px;text-align:center;width:min(360px,90vw);box-shadow:0 10px 30px #0008}
+#swapBox .row{margin-top:10px}
+.chip.rush{background:#e05656dd}
 .chip{background:#000a;padding:8px 12px;border-radius:10px;font-weight:600}
 #guessBox{position:absolute;right:12px;bottom:12px;z-index:5;width:300px;height:220px;display:flex;flex-direction:column;gap:6px;transition:width .2s,height .2s}
 #guessBox:hover,#guessBox.big{width:min(600px,92vw);height:min(440px,60vh)}
@@ -79,6 +84,10 @@ th{color:var(--muted);font-weight:500}
   <select id="moveSel"><option value="move">Можно ходить</option><option value="nomove">Без передвижения (только смотреть)</option></select>
   <label>Время на раунд</label>
   <select id="timeSel"><option value="0">Без ограничения</option><option value="60">1 минута</option><option value="180">3 минуты</option><option value="300">5 минут</option></select>
+  <label>Сложность</label>
+  <select id="levelSel"><option value="easy">Лёгкий — места возле городов</option><option value="hard">Сложный — любая точка страны</option></select>
+  <label>Вдвоём: 30 секунд после ответа соперника</label>
+  <select id="rushSel"><option value="on">Включено</option><option value="off">Выключено</option></select>
   <div class="row">
     <button id="startSolo">Играть одному</button>
     <button id="createRoom">Создать комнату</button>
@@ -121,6 +130,11 @@ th{color:var(--muted);font-weight:500}
     <div class="chip" id="hudOpp" style="display:none"></div>
   </div>
   <div id="compass" title="Нажмите, чтобы повернуться на север"><svg id="compassRose" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#0f1720cc" stroke="#fff6" stroke-width="2"/><polygon points="32,15 37,32 27,32" fill="#e8453c"/><polygon points="32,49 37,32 27,32" fill="#e8eef4"/><circle cx="32" cy="32" r="3" fill="#0f1720"/><text x="32" y="12" font-size="10" font-weight="700" fill="#ff6b61" text-anchor="middle">С</text><text x="32" y="59" font-size="8" fill="#ccc" text-anchor="middle">Ю</text><text x="8" y="35" font-size="8" fill="#ccc" text-anchor="middle">З</text><text x="56" y="35" font-size="8" fill="#ccc" text-anchor="middle">В</text></svg></div>
+  <button id="skipBtn">🔄 Другое место</button>
+  <div id="swapBox" style="display:none">
+    <div id="swapText"></div>
+    <div class="row" id="swapBtns"><button id="swapYes">Согласен</button><button class="secondary" id="swapNo">Нет</button></div>
+  </div>
   <div id="guessBox">
     <div id="guessMap"></div>
     <button id="guessBtn" disabled>Поставьте точку на карте</button>
@@ -297,24 +311,100 @@ window.onGoogle = () => { svService = new google.maps.StreetViewService(); };
 $('keySave').onclick=()=>{const k=$('keyInput').value.trim(); if(!k)return; LS.set('gkey',k); location.reload();};
 
 // ====== СЛУЧАЙНОЕ МЕСТО ======
+// Лёгкий уровень: точка в нескольких км от города из списка
 function randomSeed(){const s=SEEDS[Math.floor(Math.random()*SEEDS.length)];
-  return {lat:s[0]+(Math.random()-.5)*0.3, lng:s[1]+(Math.random()-.5)*0.3};}
-function findPano(tries=0){
-  return new Promise((resolve,reject)=>{
-    if(tries>15) return reject(new Error('Не нашлось панорамы'));
-    svService.getPanorama({location:randomSeed(),radius:20000,sources:[google.maps.StreetViewSource.GOOGLE],
-      preference:google.maps.StreetViewPreference.NEAREST},(data,status)=>{
-      // Только официальные панорамы Google (у пользовательских фото часто видна подпись места)
-      const ok = status==='OK' && data && data.location && data.links && data.links.length>0 &&
-                 data.copyright && data.copyright.indexOf('Google')!==-1;
-      if(ok) resolve({pano:data.location.pano, lat:data.location.latLng.lat(), lng:data.location.latLng.lng()});
-      else findPano(tries+1).then(resolve,reject);
-    });
-  });
+  return {lat:s[0]+(Math.random()-.5)*0.12, lng:s[1]+(Math.random()-.5)*0.12};}
+
+// Сложный уровень: страны со съёмкой Google (коды ISO). Россия (643) и Беларусь (112) запрещены.
+const HARD_COUNTRIES = ['826','372','250','724','620','380','276','528','056','442','756','040','203','703','348','616','440','428','233',
+  '246','752','578','208','352','804','642','100','300','191','705','688','499','008','807','070','792',
+  '840','124','484','320','188','591','170','218','604','068','152','032','858','076','214','630',
+  '392','410','158','764','116','418','458','360','608','356','050','144','496','398','417','376','400','784','634','064',
+  '710','426','748','072','516','404','800','646','288','566','686','788','036','554'];
+const BANNED = ['643','112'];
+let geo=null, geoPromise=null;
+function loadGeo(){
+  if(!geoPromise) geoPromise = fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json').then(r=>r.json()).then(topo=>{
+    const fc=topojson.feature(topo, topo.objects.countries);
+    const countries=[], bannedPolys=[], segs=[];
+    for(const f of fc.features){
+      if(!f.geometry) continue;
+      const id=String(f.id).padStart(3,'0');
+      const polys=f.geometry.type==='Polygon'?[f.geometry.coordinates]:f.geometry.coordinates;
+      if(BANNED.includes(id)){
+        polys.forEach(p=>{ bannedPolys.push(p); p.forEach(ring=>{ for(let i=1;i<ring.length;i++) segs.push([ring[i-1],ring[i]]); }); });
+      } else if(HARD_COUNTRIES.includes(id)){
+        const parts=polys.map(p=>{ const ring=p[0]; let minX=180,minY=90,maxX=-180,maxY=-90,a=0;
+          for(let i=0;i<ring.length;i++){ const [x,y]=ring[i]; minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);
+            if(i) a+=ring[i-1][0]*y-x*ring[i-1][1]; }
+          return {p, bbox:[minX,minY,maxX,maxY], area:Math.abs(a/2)*Math.cos((minY+maxY)/2*Math.PI/180)}; }).filter(x=>x.bbox[2]-x.bbox[0]<180);
+        const area=parts.reduce((s,x)=>s+x.area,0);
+        if(area>0) countries.push({id, parts, w:Math.sqrt(area)});
+      }
+    }
+    geo={countries, bannedPolys, segs, totalW:countries.reduce((s,c)=>s+c.w,0)};
+  }).catch(e=>{ console.error(e); geoPromise=null; });
+  return geoPromise;
 }
+function inRing(x,y,ring){ let ins=false; for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const [xi,yi]=ring[i],[xj,yj]=ring[j];
+  if(((yi>y)!==(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
+function inPoly(x,y,p){ if(!inRing(x,y,p[0])) return false; for(let k=1;k<p.length;k++) if(inRing(x,y,p[k])) return false; return true; }
+function randomHardPoint(){
+  let r=Math.random()*geo.totalW, c=geo.countries[0];
+  for(const cc of geo.countries){ r-=cc.w; if(r<=0){c=cc;break;} }
+  let r2=Math.random()*c.parts.reduce((s,x)=>s+x.area,0), part=c.parts[0];
+  for(const pp of c.parts){ r2-=pp.area; if(r2<=0){part=pp;break;} }
+  const [x0,y0,x1,y1]=part.bbox;
+  for(let i=0;i<60;i++){ const x=x0+Math.random()*(x1-x0), y=y0+Math.random()*(y1-y0); if(inPoly(x,y,part.p)) return {lat:y,lng:x}; }
+  return null;
+}
+// Запрет: Россия, Беларусь, полоса 30 км вдоль их границ, оккупированные районы Украины
+function isBanned(lat,lng){
+  if(lat<46.8 && lng>32.4 && lng<36.8 && lat>44) return true;        // Крым и левобережье Херсонщины
+  if(lat<47.6 && lng>34.6 && lng<39.8 && lat>46) return true;        // юг Запорожской и Донецкой обл.
+  if(lng>37.4 && lng<40.3 && lat>46.8 && lat<50.2) return true;      // Донбасс
+  if(!geo) return false;
+  for(const p of geo.bannedPolys) if(inPoly(lng,lat,p)) return true;
+  const kx=111.32*Math.cos(lat*Math.PI/180), ky=110.57;
+  for(const [a,b] of geo.segs){
+    if(Math.abs(a[1]-lat)>1.5 && Math.abs(b[1]-lat)>1.5) continue;
+    const ax=(a[0]-lng)*kx, ay=(a[1]-lat)*ky, bx=(b[0]-lng)*kx, by=(b[1]-lat)*ky;
+    const dx=bx-ax, dy=by-ay, L=dx*dx+dy*dy; let t=L?-(ax*dx+ay*dy)/L:0; t=Math.max(0,Math.min(1,t));
+    const px=ax+t*dx, py=ay+t*dy; if(px*px+py*py<30*30) return true;
+  }
+  return false;
+}
+// Фильтр от лодок и воды: нужна панорама Google на дороге (есть куда идти, есть название места или перекрёсток)
+const WATER=/(^|[\s,.(«"-])(река|реки|озеро|озера|залив|море|моря|пролив|канал|бухта|гавань|водохранилище|лагуна|фьорд|океан|пляж)(?=$|[\s,.)»"-])/i;
+function goodPano(d){
+  if(!d || !d.location || !d.copyright || d.copyright.indexOf('Google')===-1) return false;
+  const links=(d.links||[]).length, desc=((d.location.description||'')+' '+(d.location.shortDescription||'')).trim();
+  if(links<2) return false;
+  if(WATER.test(desc)) return false;
+  if(!desc && links<3) return false;
+  return true;
+}
+function svQuery(loc,radius){ return new Promise(res=>svService.getPanorama({location:loc,radius,sources:[google.maps.StreetViewSource.GOOGLE],
+  preference:google.maps.StreetViewPreference.NEAREST},(d,s)=>res(s==='OK'?d:null))); }
+async function findPano(level){
+  const hard = level==='hard';
+  await loadGeo();
+  for(let t=0;t<(hard?80:30);t++){
+    const p = (hard && geo) ? randomHardPoint() : randomSeed();
+    if(!p) continue;
+    const d = await svQuery(p, hard?50000:6000);
+    if(!goodPano(d)) continue;
+    const lat=d.location.latLng.lat(), lng=d.location.latLng.lng();
+    if(isBanned(lat,lng)) continue;
+    return {pano:d.location.pano, lat, lng};
+  }
+  throw new Error('Не нашлось панорамы');
+}
+loadGeo();
 
 // ====== ОБЩЕЕ ДЛЯ ИГРЫ ======
-function readSettings(){ return {rounds:+$('roundsSel').value, move:$('moveSel').value==='move', time:+$('timeSel').value}; }
+function readSettings(){ return {rounds:+$('roundsSel').value, move:$('moveSel').value==='move', time:+$('timeSel').value,
+  level:$('levelSel').value, rush:$('rushSel').value==='on'}; }
 function myName(){ const n=$('nameInput').value.trim()||'Игрок'; LS.set('name',n); return n; }
 function canStart(){
   $('err').textContent='';
@@ -344,7 +434,7 @@ function setupGuessMap(){
   if(!guessMap){
     guessMap = new google.maps.Map($('guessMap'), {...MAP_OPTS, ...WORLD, draggableCursor:'crosshair'});
     guessMap.addListener('click',e=>{
-      if(game && game.waiting) return;
+      if(game && (game.waiting || game.searching)) return;
       if(guessMarker) guessMarker.setPosition(e.latLng);
       else guessMarker = new google.maps.Marker({position:e.latLng, map:guessMap});
       $('guessBtn').disabled=false; $('guessBtn').textContent='Угадать!';
@@ -415,20 +505,30 @@ function startSolo(){
 async function soloRound(){
   game.round++; game.waiting=false;
   show('sGame');
-  $('hudOpp').style.display='none';
-  $('hudRound').textContent=`Раунд ${game.round} / ${game.rounds}`;
+  $('hudOpp').style.display='none'; $('swapBox').style.display='none';
+  $('hudTimer').classList.remove('rush');
+  $('hudRound').textContent=`Раунд ${game.round} / ${game.rounds}${game.level==='hard'?' 🔥':''}`;
   $('hudScore').textContent=`Очки: ${game.results.reduce((a,r)=>a+r.pts,0)}`;
+  await soloNewPlace();
+}
+
+// Найти и показать место в одиночной игре (и при нажатии «Другое место»)
+async function soloNewPlace(){
+  game.searching=true; clearInterval(timerId);
+  $('skipBtn').style.display=''; $('skipBtn').disabled=true;
   setupGuessMap();
   $('guessBtn').textContent='Ищем место…';
   let loc;
-  try{ loc = await findPano(); }catch(e){ alert('Не получилось найти панораму, попробуйте ещё раз.'); show('sMenu'); return; }
-  game.current = loc;
+  try{ loc = await findPano(game.level); }catch(e){ game.searching=false; $('err').textContent='Не получилось найти панораму, попробуйте ещё раз.'; show('sMenu'); return; }
+  game.current = loc; game.searching=false;
   showPano(loc, game.move);
   $('guessBtn').textContent='Поставьте точку на карте';
+  $('skipBtn').disabled=false; $('skipBtn').textContent='🔄 Другое место';
   startTimer(game.time ? now()+game.time*1000 : 0, soloSubmit);
 }
 
 function soloSubmit(){
+  if(!game || game.searching || !game.current) return;
   clearInterval(timerId);
   const truth={lat:game.current.lat,lng:game.current.lng};
   const {guess,km,pts}=currentGuess(truth);
@@ -451,7 +551,7 @@ function soloFinish(){
   $('finalTotal').textContent=`${total.toLocaleString('ru')} / ${max.toLocaleString('ru')}`;
   $('finalTable').innerHTML='<tr><th>Раунд</th><th>Ошибка</th><th>Очки</th></tr>'+
     game.results.map((r,i)=>`<tr><td>${i+1}</td><td>${r.km===null?'—':fmtKm(r.km)}</td><td>${r.pts}</td></tr>`).join('');
-  saveRecord({name:game.name,total,max,rounds:game.rounds,move:game.move,mode:'solo'});
+  saveRecord({name:game.name,total,max,rounds:game.rounds,move:game.move,mode:'solo',level:game.level});
 }
 
 // ====== ИГРА ВДВОЁМ ======
@@ -470,7 +570,7 @@ async function createRoom(){
     do{ code=String(1000+Math.floor(Math.random()*9000)); tries++; }
     while(tries<20 && (await db.ref('rooms/'+code).get()).exists());
     const locs=[];
-    for(let i=0;i<settings.rounds;i++) locs.push(await findPano());
+    for(let i=0;i<settings.rounds;i++){ $('err').textContent=`Готовим комнату и подбираем места… ${i+1} из ${settings.rounds}`; locs.push(await findPano(settings.level)); }
     leaveRoom(true);
     roomRef=db.ref('rooms/'+code); isHost=true;
     await roomRef.set({created:firebase.database.ServerValue.TIMESTAMP, host:PID, settings, locs, phase:'lobby', round:0,
@@ -498,8 +598,9 @@ async function joinRoom(){
   }catch(e){ console.error(e); $('err').textContent='Не удалось войти. Проверьте интернет.'; }
 }
 
+let gamesCounted=false;
 function enterRoom(code){
-  shownRound=0; resultFor=0; finalShown=false; $('err').textContent='';
+  shownRound=0; resultFor=0; finalShown=false; gamesCounted=false; $('err').textContent='';
   $('lobbyCode').textContent=code; show('sLobby');
   roomRef.on('value', s=>{ room=s.val(); if(!room){ leaveRoom(true); show('sMenu'); $('err').textContent='Комната закрыта.'; return; } onRoom(); });
 }
@@ -525,15 +626,50 @@ function onRoom(){
       if(r<room.settings.rounds) roomRef.update({round:r+1, roundStart:firebase.database.ServerValue.TIMESTAMP});
       else roomRef.update({phase:'final'});
     }
-  } else if(shownRound!==r){ multiRound(r); }
+  } else if(shownRound!==r || (game && game.current && room.locs[r-1] && game.current.pano!==room.locs[r-1].pano)){ multiRound(r); }
   else updateOpp(r, ps);
+  updateSwapUI();
 }
+
+// ---- «Другое место» вдвоём: один предлагает, второй соглашается или нет ----
+function anyGuessed(r){ return players().some(p=>p.guesses && p.guesses[r]); }
+function updateSwapUI(){
+  if(!game || game.mode!=='multi' || !room || room.phase!=='play'){ $('swapBox').style.display='none'; return; }
+  const r=game.round, sw=room.swap, anyG=anyGuessed(r), mine=sw && sw.by===PID;
+  if(sw && (sw.round!==r || anyG) && mine){ roomRef.child('swap').remove(); return; }   // устаревшее предложение
+  const pending = sw && sw.round===r && sw.status==='pending';
+  $('skipBtn').style.display = anyG ? 'none' : '';
+  $('skipBtn').disabled = !!pending || !!game.searching || (sw && sw.round===r);
+  $('skipBtn').textContent = game.searching ? 'Ищем место…' : (pending && mine) ? 'Ждём ответа соперника…' : '🔄 Другое место';
+  if(pending && !mine && !anyG){
+    $('swapText').innerHTML=`<b>${esc(sw.name)}</b> предлагает сменить место`; $('swapBtns').style.display=''; $('swapBox').style.display='';
+  } else if(sw && sw.round===r && sw.status==='no' && mine){
+    $('swapText').textContent='Соперник хочет остаться на этом месте'; $('swapBtns').style.display='none'; $('swapBox').style.display='';
+    setTimeout(()=>{ if(roomRef && room && room.swap && room.swap.status==='no' && room.swap.by===PID) roomRef.child('swap').remove(); }, 2500);
+  } else $('swapBox').style.display='none';
+}
+async function skipPlace(){
+  if(!game || game.waiting || game.searching) return;
+  if(game.mode==='solo'){ await soloNewPlace(); return; }
+  if(!roomRef || !room || room.swap || anyGuessed(game.round)) return;
+  game.searching=true; updateSwapUI();
+  const r=game.round, me=players().find(p=>p.id===PID);
+  try{ const loc=await findPano(room.settings.level||'easy');
+    if(roomRef && room && room.round===r && !room.swap && !anyGuessed(r))
+      await roomRef.child('swap').set({by:PID, name:me?me.name:'Игрок', round:r, loc, status:'pending'});
+  }catch(e){ console.error(e); }
+  if(game) game.searching=false; updateSwapUI();
+}
+$('skipBtn').onclick = skipPlace;
+$('swapYes').onclick = ()=>{ const sw=room && room.swap; if(!sw || sw.round!==room.round) return;
+  roomRef.update({[`locs/${sw.round-1}`]:sw.loc, roundStart:firebase.database.ServerValue.TIMESTAMP, swap:null}); };
+$('swapNo').onclick = ()=>{ if(room && room.swap) roomRef.child('swap/status').set('no'); };
 
 function renderLobby(ps){
   const st=room.settings;
   $('lobbyPlayers').innerHTML = ps.map((p,i)=>`<div><span class="dot" style="background:${COLORS[i]}"></span>${esc(p.name)}${p.id===room.host?' (создатель)':''}${p.id===PID?' — это вы':''}</div>`).join('')
     + (ps.length<2?'<div style="color:var(--muted)">Ждём второго игрока…</div>':'');
-  $('lobbySettings').textContent = `Раундов: ${st.rounds} · ${st.move?'можно ходить':'без передвижения'} · ${st.time?('время: '+(st.time/60)+' мин'):'без ограничения времени'}`;
+  $('lobbySettings').textContent = `Раундов: ${st.rounds} · ${st.level==='hard'?'сложный 🔥':'лёгкий'} · ${st.move?'можно ходить':'без передвижения'} · ${st.time?('время: '+(st.time/60)+' мин'):'без ограничения времени'} · 30 сек после ответа соперника: ${st.rush?'вкл':'выкл'}`;
   $('lobbyHint').textContent = isHost ? 'Скажите этот код второму игроку:' : 'Вы в комнате. Ждём, когда создатель начнёт игру.';
   $('lobbyStart').style.display = isHost ? '' : 'none';
   $('lobbyStart').disabled = ps.length<2;
@@ -541,24 +677,34 @@ function renderLobby(ps){
 
 function multiRound(r){
   shownRound=r;
-  if(r===1) bump('games');
+  if(!gamesCounted){ bump('games'); gamesCounted=true; }
   const st=room.settings, loc=room.locs[r-1];
-  game = {mode:'multi', round:r, rounds:st.rounds, move:st.move, time:st.time, current:loc, waiting:false};
+  game = {mode:'multi', round:r, rounds:st.rounds, move:st.move, time:st.time, current:loc, waiting:false, rushOn:false};
   show('sGame');
-  $('hudRound').textContent=`Раунд ${r} / ${st.rounds}`;
+  $('hudTimer').classList.remove('rush');
+  $('hudRound').textContent=`Раунд ${r} / ${st.rounds}${st.level==='hard'?' 🔥':''}`;
   const me=players().find(p=>p.id===PID);
   $('hudScore').textContent=`Очки: ${me?totalOf(me,r-1):0}`;
   setupGuessMap();
   showPano(loc, st.move);
-  updateOpp(r, players());
   const start = room.roundStart || now();
   startTimer(st.time ? start+st.time*1000 : 0, multiSubmit);
+  updateOpp(r, players());   // может включить таймер «30 секунд», поэтому после основного таймера
 }
 
 function updateOpp(r, ps){
   const op=ps.find(p=>p.id!==PID);
   $('hudOpp').style.display = op ? '' : 'none';
   if(op) $('hudOpp').textContent = `${op.name}: ${op.guesses&&op.guesses[r] ? 'ответил ✓' : 'думает…'}`;
+  // 30 секунд после ответа соперника
+  const og = op && op.guesses && op.guesses[r];
+  if(og && room.settings.rush && game && !game.waiting && !game.rushOn){
+    game.rushOn=true;
+    const at = og.at || now();
+    const roundEnd = room.settings.time ? (room.roundStart||now()) + room.settings.time*1000 : Infinity;
+    $('hudTimer').classList.add('rush');
+    startTimer(Math.min(roundEnd, at+30000), multiSubmit);
+  }
 }
 
 function multiSubmit(){
@@ -568,7 +714,9 @@ function multiSubmit(){
   const {guess,km,pts}=currentGuess(truth);
   game.waiting=true;
   $('guessBtn').disabled=true; $('guessBtn').textContent='Ответ принят. Ждём соперника…';
-  roomRef.child(`players/${PID}/guesses/${r}`).set(guess?{lat:guess.lat,lng:guess.lng,km,pts}:{none:true,pts:0});
+  $('skipBtn').style.display='none'; $('swapBox').style.display='none';
+  const at=firebase.database.ServerValue.TIMESTAMP;
+  roomRef.child(`players/${PID}/guesses/${r}`).set(guess?{lat:guess.lat,lng:guess.lng,km,pts,at}:{none:true,pts:0,at});
 }
 
 function multiResult(r, ps){
@@ -606,7 +754,7 @@ function multiFinal(ps){
   body+='<tr><td><b>Всего</b></td>'+ps.map(p=>`<td><b>${totalOf(p,n)}</b></td>`).join('')+'</tr>';
   $('finalTable').innerHTML=head+body;
   const me=ps.find(p=>p.id===PID);
-  if(me) saveRecord({name:me.name,total:totalOf(me,n),max,rounds:n,move:room.settings.move,mode:'duo'});
+  if(me) saveRecord({name:me.name,total:totalOf(me,n),max,rounds:n,move:room.settings.move,mode:'duo',level:room.settings.level||'easy'});
 }
 
 $('lobbyStart').onclick=()=>{ if(isHost && players().length>=2) roomRef.update({phase:'play', round:1, roundStart:firebase.database.ServerValue.TIMESTAMP}); };
@@ -626,7 +774,7 @@ async function showRecords(){
   else recs=LS.get('records',[]);
   recs.sort((a,b)=>b.total/b.max-a.total/a.max); recs=recs.slice(0,20);
   $('recTable').innerHTML = recs.length? '<tr><th>Имя</th><th>Очки</th><th>Раунды</th><th>Дата</th></tr>'+
-    recs.map(r=>`<tr><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}</td><td>${r.total.toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
+    recs.map(r=>`<tr><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}${r.level==='hard'?' 🔥':''}</td><td>${r.total.toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
     : '<tr><td>Пока нет сыгранных игр</td></tr>';
   show('sRecords');
 }
