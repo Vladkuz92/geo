@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ГеоУгадайка</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{--bg:#0f1720;--panel:#17222e;--text:#e8eef4;--muted:#93a4b5;--accent:#2fbf71;--accent2:#f5b83d;--bad:#e05656}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:12px 18px;background:var(--accent);color:#062;font-weight:700}
+button.secondary{background:#2a3a4b;color:var(--text)}
+button:disabled{opacity:.4;cursor:not-allowed}
+input,select{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #2f4152;background:#0c131a;color:var(--text);width:100%}
+.screen{display:none;height:100%}
+.screen.active{display:block}
+.center{display:flex;align-items:center;justify-content:center;min-height:100%;padding:16px}
+.card{background:var(--panel);border-radius:16px;padding:24px;width:100%;max-width:460px;box-shadow:0 10px 40px #0006}
+.card h1{margin:0 0 4px;font-size:28px}
+.card p{color:var(--muted);margin:0 0 18px}
+label{display:block;margin:14px 0 6px;color:var(--muted);font-size:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.row button{flex:1}
+#pano{position:absolute;inset:0}
+#hud{position:absolute;top:10px;left:10px;display:flex;gap:8px;z-index:5}
+.chip{background:#000a;padding:8px 12px;border-radius:10px;font-weight:600}
+#guessBox{position:absolute;right:12px;bottom:12px;z-index:5;width:300px;height:220px;display:flex;flex-direction:column;gap:6px;transition:width .2s,height .2s}
+#guessBox:hover,#guessBox.big{width:min(600px,92vw);height:min(440px,60vh)}
+#guessMap{flex:1;border-radius:12px;border:2px solid #fff3}
+#guessBtn{width:100%}
+#resultMap{position:absolute;inset:0}
+#resultPanel{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);z-index:500;background:var(--panel);padding:16px 22px;border-radius:14px;text-align:center;width:min(420px,92vw)}
+#resultPanel .pts{font-size:30px;font-weight:800;color:var(--accent2)}
+.bar{height:8px;background:#0c131a;border-radius:6px;overflow:hidden;margin:10px 0}
+.bar>div{height:100%;background:var(--accent2)}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+td,th{padding:6px 4px;text-align:left;border-bottom:1px solid #2a3a4b;font-size:14px}
+th{color:var(--muted);font-weight:500}
+.total{font-size:36px;font-weight:800;color:var(--accent2)}
+#err{color:var(--bad);margin-top:10px;min-height:1em}
+#usage{margin-top:18px;padding:12px;border-radius:10px;background:#0c131a;font-size:14px;color:var(--muted)}
+#usage b{color:var(--text)}
+#usageBar{background:var(--accent)}
+#usageNote{font-size:12px}
+@media (max-width:600px){#guessBox{width:46vw;height:30vh}#guessBox.big{width:94vw;height:55vh}}
+</style>
+</head>
+<body>
+
+<!-- Ввод ключа (только если ключ не прописан в коде) -->
+<section id="sKey" class="screen"><div class="center"><div class="card">
+  <h1>Ключ Google</h1>
+  <p>Вставьте API‑ключ Google Maps. Он сохранится только в этом браузере.</p>
+  <input id="keyInput" placeholder="AIza...">
+  <div class="row"><button id="keySave">Сохранить</button></div>
+  <div id="keyErr" style="color:var(--bad);margin-top:10px"></div>
+</div></div></section>
+
+<!-- Меню -->
+<section id="sMenu" class="screen"><div class="center"><div class="card">
+  <h1>🌍 ГеоУгадайка</h1>
+  <p>Угадай, где находится панорама. Весь мир, кроме России и Беларуси.</p>
+  <label>Ваше имя</label>
+  <input id="nameInput" maxlength="20" placeholder="Например: Папа">
+  <label>Раундов</label>
+  <select id="roundsSel"><option>3</option><option selected>5</option><option>10</option></select>
+  <label>Передвижение</label>
+  <select id="moveSel"><option value="move">Можно ходить</option><option value="nomove">Без передвижения (только смотреть)</option></select>
+  <label>Время на раунд</label>
+  <select id="timeSel"><option value="0">Без ограничения</option><option value="60">1 минута</option><option value="120">2 минуты</option><option value="300">5 минут</option></select>
+  <div class="row">
+    <button id="startSolo">Играть одному</button>
+    <button class="secondary" disabled title="Следующий шаг">Вдвоём (скоро)</button>
+  </div>
+  <div class="row"><button class="secondary" id="showRecords">Рекорды</button></div>
+  <div id="usage">
+    <div id="usageText"></div>
+    <div class="bar"><div id="usageBar"></div></div>
+    <div id="usageNote"></div>
+  </div>
+  <div id="err"></div>
+</div></div></section>
+
+<!-- Игра -->
+<section id="sGame" class="screen" style="position:relative">
+  <div id="pano"></div>
+  <div id="hud">
+    <div class="chip" id="hudRound"></div>
+    <div class="chip" id="hudScore"></div>
+    <div class="chip" id="hudTimer" style="display:none"></div>
+  </div>
+  <div id="guessBox">
+    <div id="guessMap"></div>
+    <button id="guessBtn" disabled>Поставьте точку на карте</button>
+  </div>
+</section>
+
+<!-- Результат раунда -->
+<section id="sResult" class="screen" style="position:relative">
+  <div id="resultMap"></div>
+  <div id="resultPanel">
+    <div id="resDist"></div>
+    <div class="pts" id="resPts"></div>
+    <div class="bar"><div id="resBar"></div></div>
+    <button id="nextBtn">Дальше</button>
+  </div>
+</section>
+
+<!-- Итог -->
+<section id="sFinal" class="screen"><div class="center"><div class="card">
+  <h1>Игра окончена</h1>
+  <p id="finalName"></p>
+  <div class="total" id="finalTotal"></div>
+  <table id="finalTable"></table>
+  <div class="row"><button id="againBtn">Ещё раз</button><button class="secondary" id="menuBtn">В меню</button></div>
+</div></div></section>
+
+<!-- Рекорды -->
+<section id="sRecords" class="screen"><div class="center"><div class="card">
+  <h1>🏆 Рекорды</h1>
+  <p>Лучшие игры на этом устройстве.</p>
+  <table id="recTable"></table>
+  <div class="row"><button class="secondary" id="recBack">Назад</button></div>
+</div></div></section>
+
+<script>
+// ====== НАСТРОЙКИ ======
+// Когда сайт будет на хостинге, сюда впишем ключ, ограниченный адресом сайта.
+const GOOGLE_API_KEY = "ВСТАВЬТЕ_КЛЮЧ";
+
+// Опорные точки: города и посёлки с хорошим покрытием Street View.
+// Россия и Беларусь исключены; точки у их границ и в оккупированных районах не используются.
+const SEEDS = [
+// Европа
+[51.507,-0.128],[53.48,-2.24],[55.953,-3.188],[51.48,-3.18],[50.37,-4.14],[54.6,-5.93],[53.35,-6.26],[52.66,-8.63],[51.9,-8.47],
+[48.857,2.352],[45.76,4.84],[43.3,5.37],[44.84,-0.58],[47.22,-1.55],[48.58,7.75],[43.6,1.44],[49.44,1.1],[45.19,5.72],
+[40.42,-3.70],[41.39,2.17],[37.39,-5.99],[39.47,-0.38],[43.26,-2.93],[42.88,-8.54],[36.72,-4.42],[38.72,-9.14],[41.15,-8.61],[37.02,-7.93],
+[41.9,12.5],[45.46,9.19],[43.77,11.25],[40.85,14.27],[38.12,13.36],[44.49,11.34],[45.07,7.69],[39.22,9.12],
+[52.52,13.40],[48.14,11.58],[53.55,9.99],[50.94,6.96],[50.11,8.68],[51.05,13.74],[48.78,9.18],[51.34,12.37],[54.32,10.13],
+[52.37,4.90],[51.92,4.48],[53.22,6.57],[50.85,4.35],[51.22,4.40],[49.61,6.13],[47.37,8.54],[46.2,6.14],[46.95,7.45],
+[48.21,16.37],[47.07,15.44],[47.27,11.4],[50.08,14.44],[49.19,16.61],[48.15,17.11],[47.5,19.04],[46.25,20.15],
+[52.23,21.01],[50.06,19.94],[51.11,17.03],[54.35,18.65],[52.41,16.93],[50.04,22.0],[53.43,14.55],
+[55.68,12.57],[56.16,10.2],[59.33,18.07],[57.71,11.97],[55.6,13.0],[63.83,20.26],[59.91,10.75],[60.39,5.32],[63.43,10.39],[69.65,18.96],
+[60.17,24.94],[61.5,23.76],[65.01,25.47],[60.45,22.27],[59.44,24.75],[58.38,26.72],[56.95,24.11],[56.51,21.01],[55.71,21.13],[54.9,23.9],
+[50.45,30.52],[49.84,24.03],[46.48,30.72],[49.23,28.47],[48.92,24.71],[49.55,25.59],[48.62,22.29],[50.62,26.25],
+[44.43,26.10],[46.77,23.59],[45.75,21.23],[47.16,27.59],[42.7,23.32],[42.14,24.75],[43.21,27.91],[37.98,23.73],[40.64,22.94],[35.34,25.14],[39.62,19.92],
+[45.81,15.98],[43.51,16.44],[42.65,18.09],[46.06,14.51],[44.79,20.45],[43.86,18.41],[42.0,21.43],[41.33,19.82],[35.9,14.51],[64.15,-21.94],
+// Турция и Ближний Восток
+[41.01,28.98],[39.93,32.86],[38.42,27.14],[36.9,30.7],[37.0,35.32],[32.08,34.78],[31.77,35.21],[31.95,35.93],[25.2,55.27],[24.45,54.38],
+// Азия
+[35.68,139.69],[34.69,135.5],[43.06,141.35],[33.59,130.4],[35.17,136.9],[38.26,140.87],[26.21,127.68],[37.57,126.98],[35.18,129.08],[35.87,128.6],
+[25.03,121.56],[22.63,120.3],[13.75,100.5],[18.79,98.98],[7.88,98.39],[3.14,101.69],[5.41,100.33],[1.35,103.82],[-6.2,106.85],[-8.65,115.22],[-7.25,112.75],
+[14.6,120.98],[10.31,123.89],[28.61,77.21],[19.08,72.88],[12.97,77.59],[22.57,88.36],[13.08,80.27],[6.93,79.86],[27.7,85.32],[23.81,90.41],
+[43.24,76.89],[51.17,71.45],[42.87,74.59],[47.92,106.92],[41.31,69.28],[41.72,44.79],[40.18,44.51],
+// Африка
+[-33.92,18.42],[-26.2,28.05],[-29.86,31.02],[-25.75,28.19],[-34.0,25.6],[-1.29,36.82],[-4.04,39.67],[0.35,32.58],[-24.65,25.91],[-22.56,17.08],
+[5.6,-0.19],[6.52,3.38],[14.72,-17.47],[36.81,10.18],[-18.91,47.52],[-15.42,28.28],[-6.8,39.28],[-20.16,57.5],
+// Северная Америка
+[40.71,-74.0],[42.36,-71.06],[39.95,-75.16],[38.9,-77.04],[33.75,-84.39],[25.76,-80.19],[41.88,-87.63],[44.98,-93.27],[39.1,-94.58],[29.76,-95.37],
+[32.78,-96.8],[30.27,-97.74],[39.74,-104.99],[35.08,-106.65],[33.45,-112.07],[36.17,-115.14],[34.05,-118.24],[37.77,-122.42],[45.52,-122.68],[47.61,-122.33],
+[61.22,-149.9],[21.31,-157.86],[46.87,-113.99],[43.62,-116.2],[40.76,-111.89],[35.47,-97.52],[35.15,-90.05],[36.16,-86.78],[42.33,-83.05],[44.8,-68.77],
+[43.65,-79.38],[45.5,-73.57],[46.81,-71.21],[49.28,-123.12],[51.05,-114.07],[53.55,-113.49],[49.9,-97.14],[44.65,-63.57],[47.56,-52.71],
+[19.43,-99.13],[20.67,-103.35],[25.69,-100.32],[21.16,-86.85],[20.97,-89.62],[9.93,-84.08],[14.63,-90.51],[18.47,-69.9],[18.0,-76.8],
+// Южная Америка
+[-23.55,-46.63],[-22.91,-43.17],[-15.79,-47.88],[-12.97,-38.5],[-30.03,-51.23],[-3.73,-38.53],[-25.43,-49.27],[-19.92,-43.94],[-8.05,-34.88],
+[-34.6,-58.38],[-31.42,-64.18],[-32.89,-68.84],[-41.13,-71.31],[-34.9,-56.16],[-33.45,-70.67],[-36.83,-73.05],[-23.65,-70.4],[-53.16,-70.91],
+[-12.05,-77.04],[-13.53,-71.97],[-0.18,-78.47],[-2.17,-79.92],[4.71,-74.07],[6.24,-75.58],[10.39,-75.51],[-16.5,-68.15],[-25.26,-57.58],
+// Океания
+[-33.87,151.21],[-37.81,144.96],[-27.47,153.03],[-31.95,115.86],[-34.93,138.6],[-42.88,147.33],[-12.46,130.84],[-16.92,145.77],[-23.7,133.88],
+[-36.85,174.76],[-41.29,174.78],[-43.53,172.64],[-45.03,168.66],[-45.87,170.5]
+];
+
+// Защита бесплатного лимита Google (5 000 открытий панорамы в месяц)
+const DAILY_LIMIT = 150;     // открытий панорамы в день на этом устройстве
+const MONTHLY_FREE = 5000;   // бесплатно у Google в месяц
+
+// ====== СОСТОЯНИЕ ======
+const $ = id => document.getElementById(id);
+let pano, svService, guessMap, guessMarker, resultMap, timerId;
+let game = null;
+const LS = {get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},
+            set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$(id).classList.add('active'); if(id==='sMenu') drawUsage();}
+
+// ====== СЧЁТЧИК ИСПОЛЬЗОВАНИЯ ======
+function pad(n){return String(n).padStart(2,'0');}
+function getUsage(){
+  const d=new Date(), day=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, month=day.slice(0,7);
+  const u=LS.get('usage',{});
+  if(u.month!==month){u.month=month;u.monthLoads=0;u.monthGames=0;}
+  if(u.day!==day){u.day=day;u.dayLoads=0;u.dayGames=0;}
+  return u;
+}
+function addUsage(field){const u=getUsage(); u[field]=(u[field]||0)+1;
+  if(field==='dayLoads') u.monthLoads=(u.monthLoads||0)+1;
+  if(field==='dayGames') u.monthGames=(u.monthGames||0)+1;
+  LS.set('usage',u);}
+function drawUsage(){
+  const u=getUsage(), left=Math.max(0,MONTHLY_FREE-u.monthLoads), pct=Math.min(100,u.monthLoads/MONTHLY_FREE*100);
+  $('usageText').innerHTML=`Сегодня: <b>${u.dayGames}</b> игр · открытий панорамы: <b>${u.dayLoads}</b> из ${DAILY_LIMIT}<br>`+
+    `Осталось в месяце: <b>~${left.toLocaleString('ru')}</b> из ${MONTHLY_FREE.toLocaleString('ru')}`;
+  $('usageBar').style.width=pct+'%';
+  $('usageBar').style.background = pct>80?'var(--bad)':pct>50?'var(--accent2)':'var(--accent)';
+  $('usageNote').textContent='Считается только на этом устройстве. Одно открытие страницы = одна загрузка, раунды и ходьба не тратят лимит.';
+}
+
+// ====== ЗАГРУЗКА GOOGLE ======
+function getKey(){return (GOOGLE_API_KEY && GOOGLE_API_KEY!=="ВСТАВЬТЕ_КЛЮЧ") ? GOOGLE_API_KEY : LS.get('gkey','');}
+function loadGoogle(){
+  const key = getKey();
+  if(!key){show('sKey');return;}
+  window.gm_authFailure = () => { LS.set('gkey',''); show('sKey'); $('keyErr').textContent='Google отклонил ключ. Проверьте его и включённый Maps JavaScript API.'; };
+  const s=document.createElement('script');
+  s.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=onGoogle&v=weekly&language=ru`;
+  s.async=true; s.onerror=()=>{$('err').textContent='Не удалось загрузить Google Maps.'};
+  document.head.appendChild(s);
+  show('sMenu');
+}
+window.onGoogle = () => { svService = new google.maps.StreetViewService(); };
+$('keySave').onclick=()=>{const k=$('keyInput').value.trim(); if(!k)return; LS.set('gkey',k); location.reload();};
+
+// ====== СЛУЧАЙНОЕ МЕСТО ======
+function randomSeed(){const s=SEEDS[Math.floor(Math.random()*SEEDS.length)];
+  return {lat:s[0]+(Math.random()-.5)*0.3, lng:s[1]+(Math.random()-.5)*0.3};}
+function findPano(tries=0){
+  return new Promise((resolve,reject)=>{
+    if(tries>15) return reject(new Error('Не нашлось панорамы'));
+    svService.getPanorama({location:randomSeed(),radius:20000,source:google.maps.StreetViewSource.OUTDOOR,
+      preference:google.maps.StreetViewPreference.NEAREST},(data,status)=>{
+      // Только официальные панорамы Google (у пользовательских фото часто видна подпись места)
+      const ok = status==='OK' && data && data.location && data.links && data.links.length>0 &&
+                 data.copyright && data.copyright.indexOf('Google')!==-1;
+      if(ok) resolve({pano:data.location.pano, lat:data.location.latLng.lat(), lng:data.location.latLng.lng()});
+      else findPano(tries+1).then(resolve,reject);
+    });
+  });
+}
+
+// ====== ИГРА ======
+$('nameInput').value = LS.get('name','');
+$('startSolo').onclick = startGame;
+$('againBtn').onclick = startGame;
+$('menuBtn').onclick = ()=>show('sMenu');
+
+function startGame(){
+  if(!svService){$('err').textContent='Google ещё загружается, подождите секунду.';return;}
+  if(!pano && getUsage().dayLoads>=DAILY_LIMIT){
+    $('err').textContent=`На сегодня лимит (${DAILY_LIMIT} открытий) исчерпан. Приходите завтра!`; return;}
+  const name = $('nameInput').value.trim()||'Игрок'; LS.set('name',name);
+  addUsage('dayGames');
+  game = {name, rounds:+$('roundsSel').value, move:$('moveSel').value==='move', time:+$('timeSel').value, round:0, results:[]};
+  nextRound();
+}
+
+async function nextRound(){
+  game.round++;
+  show('sGame');
+  $('hudRound').textContent=`Раунд ${game.round} / ${game.rounds}`;
+  $('hudScore').textContent=`Очки: ${game.results.reduce((a,r)=>a+r.pts,0)}`;
+  $('guessBtn').disabled=true; $('guessBtn').textContent='Поставьте точку на карте';
+  let loc;
+  try{ loc = await findPano(); }catch(e){ alert('Не получилось найти панораму, попробуйте ещё раз.'); show('sMenu'); return; }
+  game.current = loc;
+  // Панорама создаётся один раз на всё время, пока открыта страница (экономия бесплатного лимита)
+  const opts = {pano:loc.pano, pov:{heading:Math.random()*360,pitch:0}, zoom:0,
+    addressControl:false, showRoadLabels:false, fullscreenControl:false, motionTracking:false, motionTrackingControl:false,
+    enableCloseButton:false, linksControl:game.move, clickToGo:game.move, panControl:true, zoomControl:true};
+  if(!pano){ pano = new google.maps.StreetViewPanorama($('pano'), opts); addUsage('dayLoads'); }
+  else { pano.setOptions(opts); pano.setPano(loc.pano); pano.setPov(opts.pov); pano.setZoom(0); }
+  pano.setVisible(true);
+  setupGuessMap();
+  startTimer();
+}
+
+function setupGuessMap(){
+  if(!guessMap){
+    guessMap = L.map('guessMap',{worldCopyJump:true,attributionControl:true}).setView([25,10],1);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(guessMap);
+    guessMap.on('click',e=>{
+      if(guessMarker) guessMarker.setLatLng(e.latlng); else guessMarker=L.marker(e.latlng).addTo(guessMap);
+      $('guessBtn').disabled=false; $('guessBtn').textContent='Угадать!';
+    });
+    // на телефоне карта увеличивается по нажатию
+    $('guessBox').addEventListener('touchstart',()=>$('guessBox').classList.add('big'),{passive:true});
+  }
+  if(guessMarker){guessMap.removeLayer(guessMarker);guessMarker=null;}
+  guessMap.setView([25,10],1);
+  $('guessBox').classList.remove('big');
+  setTimeout(()=>guessMap.invalidateSize(),50);
+}
+
+function startTimer(){
+  clearInterval(timerId);
+  if(!game.time){$('hudTimer').style.display='none';return;}
+  let left=game.time; $('hudTimer').style.display='';
+  const draw=()=>{$('hudTimer').textContent=`⏱ ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;};
+  draw();
+  timerId=setInterval(()=>{left--;draw(); if(left<=0){clearInterval(timerId); submitGuess();}},1000);
+}
+
+$('guessBtn').onclick = submitGuess;
+
+function distanceKm(a,b){const R=6371,r=Math.PI/180;
+  const dLat=(b.lat-a.lat)*r,dLng=(b.lng-a.lng)*r;
+  const h=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));}
+function scoreFor(km){ if(km<0.05) return 5000; return Math.round(5000*Math.exp(-km/2000)); }
+
+function submitGuess(){
+  clearInterval(timerId);
+  const truth={lat:game.current.lat,lng:game.current.lng};
+  let guess=null, km=null, pts=0;
+  if(guessMarker){const ll=guessMarker.getLatLng(); guess={lat:ll.lat,lng:ll.lng}; km=distanceKm(guess,truth); pts=scoreFor(km);}
+  game.results.push({truth,guess,km,pts});
+  showResult(truth,guess,km,pts);
+}
+
+function fmtKm(km){ if(km===null) return 'Время вышло — точка не поставлена'; return km<1?`${Math.round(km*1000)} м`:`${km<100?km.toFixed(1):Math.round(km).toLocaleString('ru')} км`; }
+
+function showResult(truth,guess,km,pts){
+  show('sResult');
+  if(!resultMap){
+    resultMap=L.map('resultMap',{worldCopyJump:true});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(resultMap);
+  }
+  if(resultMap._layersGroup) resultMap.removeLayer(resultMap._layersGroup);
+  const g=L.layerGroup().addTo(resultMap); resultMap._layersGroup=g;
+  const flag=L.divIcon({html:'🚩',className:'',iconSize:[30,30],iconAnchor:[6,28]});
+  L.marker([truth.lat,truth.lng],{icon:flag}).addTo(g);
+  setTimeout(()=>{
+    resultMap.invalidateSize();
+    if(guess){ L.marker([guess.lat,guess.lng]).addTo(g);
+      L.polyline([[guess.lat,guess.lng],[truth.lat,truth.lng]],{dashArray:'6 8',color:'#222'}).addTo(g);
+      resultMap.fitBounds(L.latLngBounds([[guess.lat,guess.lng],[truth.lat,truth.lng]]),{padding:[60,60],maxZoom:12});
+    } else resultMap.setView([truth.lat,truth.lng],5);
+  },50);
+  $('resDist').textContent = guess?`Вы ошиблись на ${fmtKm(km)}`:fmtKm(null);
+  $('resPts').textContent = `+${pts} очков`;
+  $('resBar').style.width = (pts/50)+'%';
+  $('nextBtn').textContent = game.round<game.rounds?'Следующий раунд':'Итоги';
+}
+
+$('nextBtn').onclick = ()=>{ if(game.round<game.rounds) nextRound(); else finish(); };
+
+function finish(){
+  const total=game.results.reduce((a,r)=>a+r.pts,0), max=game.rounds*5000;
+  show('sFinal');
+  $('finalName').textContent=`${game.name}, вот ваш результат:`;
+  $('finalTotal').textContent=`${total.toLocaleString('ru')} / ${max.toLocaleString('ru')}`;
+  $('finalTable').innerHTML='<tr><th>Раунд</th><th>Ошибка</th><th>Очки</th></tr>'+
+    game.results.map((r,i)=>`<tr><td>${i+1}</td><td>${r.km===null?'—':fmtKm(r.km)}</td><td>${r.pts}</td></tr>`).join('');
+  const recs=LS.get('records',[]);
+  recs.push({name:game.name,total,max,rounds:game.rounds,move:game.move,date:new Date().toLocaleDateString('ru')});
+  recs.sort((a,b)=>b.total/b.max-a.total/a.max);
+  LS.set('records',recs.slice(0,20));
+}
+
+// ====== РЕКОРДЫ ======
+$('showRecords').onclick=()=>{
+  const recs=LS.get('records',[]);
+  $('recTable').innerHTML = recs.length? '<tr><th>Имя</th><th>Очки</th><th>Раунды</th><th>Дата</th></tr>'+
+    recs.map(r=>`<tr><td>${r.name.replace(/</g,'&lt;')}</td><td>${r.total.toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${r.date}</td></tr>`).join('')
+    : '<tr><td>Пока нет сыгранных игр</td></tr>';
+  show('sRecords');
+};
+$('recBack').onclick=()=>show('sMenu');
+
+loadGoogle();
+</script>
+</body>
+</html>
