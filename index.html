@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГеоУгадайка</title>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 <style>
-:root{--bg:#0f1720;--panel:#17222e;--text:#e8eef4;--muted:#93a4b5;--accent:#2fbf71;--accent2:#f5b83d;--bad:#e05656}
+:root{--bg:#0f1720;--panel:#17222e;--text:#e8eef4;--muted:#93a4b5;--accent:#2fbf71;--accent2:#f5b83d;--bad:#e05656;--me:#e8453c;--op:#3d7bf5}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:12px 18px;background:var(--accent);color:#062;font-weight:700}
@@ -19,24 +21,33 @@ input,select{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid 
 .card h1{margin:0 0 4px;font-size:28px}
 .card p{color:var(--muted);margin:0 0 18px}
 label{display:block;margin:14px 0 6px;color:var(--muted);font-size:14px}
+label:first-child{margin-top:0}
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .row button{flex:1}
+.sep{margin:20px 0 0;padding-top:14px;border-top:1px solid #2a3a4b;color:var(--muted);font-size:14px}
+.join{display:flex;gap:10px;margin-top:8px}
+.join input{flex:1;letter-spacing:4px;text-align:center;font-size:18px}
+.join button{flex:0 0 auto}
+.code{font-size:48px;font-weight:800;letter-spacing:10px;text-align:center;color:var(--accent2);margin:8px 0}
+.plist div{padding:8px 0;border-bottom:1px solid #2a3a4b}
 #pano{position:absolute;inset:0}
-#hud{position:absolute;top:10px;left:10px;display:flex;gap:8px;z-index:5}
+#hud{position:absolute;top:10px;left:10px;display:flex;gap:8px;z-index:5;flex-wrap:wrap;max-width:calc(100% - 80px)}
 .chip{background:#000a;padding:8px 12px;border-radius:10px;font-weight:600}
 #guessBox{position:absolute;right:12px;bottom:12px;z-index:5;width:300px;height:220px;display:flex;flex-direction:column;gap:6px;transition:width .2s,height .2s}
 #guessBox:hover,#guessBox.big{width:min(600px,92vw);height:min(440px,60vh)}
 #guessMap{flex:1;border-radius:12px;border:2px solid #fff3}
 #guessBtn{width:100%}
 #resultMap{position:absolute;inset:0}
-#resultPanel{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);z-index:500;background:var(--panel);padding:16px 22px;border-radius:14px;text-align:center;width:min(420px,92vw)}
+#resultPanel{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);z-index:500;background:var(--panel);padding:16px 22px;border-radius:14px;text-align:center;width:min(440px,92vw)}
 #resultPanel .pts{font-size:30px;font-weight:800;color:var(--accent2)}
+#resultPanel table td,#resultPanel table th{text-align:center}
 .bar{height:8px;background:#0c131a;border-radius:6px;overflow:hidden;margin:10px 0}
 .bar>div{height:100%;background:var(--accent2)}
 table{width:100%;border-collapse:collapse;margin-top:10px}
 td,th{padding:6px 4px;text-align:left;border-bottom:1px solid #2a3a4b;font-size:14px}
 th{color:var(--muted);font-weight:500}
 .total{font-size:36px;font-weight:800;color:var(--accent2)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
 #err{color:var(--bad);margin-top:10px;min-height:1em}
 #usage{margin-top:18px;padding:12px;border-radius:10px;background:#0c131a;font-size:14px;color:var(--muted)}
 #usage b{color:var(--text)}
@@ -58,8 +69,6 @@ th{color:var(--muted);font-weight:500}
 
 <!-- Меню -->
 <section id="sMenu" class="screen"><div class="center"><div class="card">
-  <h1>🌍 ГеоУгадайка</h1>
-  <p>Угадай, где находится панорама. Весь мир, кроме России и Беларуси.</p>
   <label>Ваше имя</label>
   <input id="nameInput" maxlength="20" placeholder="Например: Папа">
   <label>Раундов</label>
@@ -70,7 +79,12 @@ th{color:var(--muted);font-weight:500}
   <select id="timeSel"><option value="0">Без ограничения</option><option value="60">1 минута</option><option value="120">2 минуты</option><option value="300">5 минут</option></select>
   <div class="row">
     <button id="startSolo">Играть одному</button>
-    <button class="secondary" disabled title="Следующий шаг">Вдвоём (скоро)</button>
+    <button id="createRoom">Создать комнату</button>
+  </div>
+  <div class="sep">Или войти в комнату по коду:</div>
+  <div class="join">
+    <input id="codeInput" maxlength="4" inputmode="numeric" placeholder="0000">
+    <button class="secondary" id="joinRoom">Войти</button>
   </div>
   <div class="row"><button class="secondary" id="showRecords">Рекорды</button></div>
   <div id="usage">
@@ -81,6 +95,20 @@ th{color:var(--muted);font-weight:500}
   <div id="err"></div>
 </div></div></section>
 
+<!-- Комната (ожидание второго игрока) -->
+<section id="sLobby" class="screen"><div class="center"><div class="card">
+  <h1>Комната</h1>
+  <p id="lobbyHint">Скажите этот код второму игроку:</p>
+  <div class="code" id="lobbyCode">····</div>
+  <div class="plist" id="lobbyPlayers"></div>
+  <p id="lobbySettings" style="margin-top:12px"></p>
+  <div class="row">
+    <button id="lobbyStart" disabled>Начать игру</button>
+    <button class="secondary" id="lobbyLeave">Выйти</button>
+  </div>
+  <div id="lobbyErr" style="color:var(--bad);margin-top:10px"></div>
+</div></div></section>
+
 <!-- Игра -->
 <section id="sGame" class="screen" style="position:relative">
   <div id="pano"></div>
@@ -88,6 +116,7 @@ th{color:var(--muted);font-weight:500}
     <div class="chip" id="hudRound"></div>
     <div class="chip" id="hudScore"></div>
     <div class="chip" id="hudTimer" style="display:none"></div>
+    <div class="chip" id="hudOpp" style="display:none"></div>
   </div>
   <div id="guessBox">
     <div id="guessMap"></div>
@@ -101,8 +130,9 @@ th{color:var(--muted);font-weight:500}
   <div id="resultPanel">
     <div id="resDist"></div>
     <div class="pts" id="resPts"></div>
-    <div class="bar"><div id="resBar"></div></div>
-    <button id="nextBtn">Дальше</button>
+    <div class="bar" id="resBarWrap"><div id="resBar"></div></div>
+    <div id="resTable"></div>
+    <button id="nextBtn" style="margin-top:10px">Дальше</button>
   </div>
 </section>
 
@@ -118,15 +148,25 @@ th{color:var(--muted);font-weight:500}
 <!-- Рекорды -->
 <section id="sRecords" class="screen"><div class="center"><div class="card">
   <h1>🏆 Рекорды</h1>
-  <p>Лучшие игры на этом устройстве.</p>
+  <p id="recHint"></p>
   <table id="recTable"></table>
   <div class="row"><button class="secondary" id="recBack">Назад</button></div>
 </div></div></section>
 
 <script>
 // ====== НАСТРОЙКИ ======
-// Когда сайт будет на хостинге, сюда впишем ключ, ограниченный адресом сайта.
+// Ключ Google (ограничен адресом сайта)
 const GOOGLE_API_KEY = "AIzaSyCXkEVihIIm6G2bi8uPdQLR-Ti9FI-ZKPw";
+// Настройки базы Firebase (общий счётчик, игра вдвоём, рекорды). Вместо null вставляется блок { ... } из Firebase.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD11hReWE25gKMFYFv2lYG_d40dtvgYO3o",
+  authDomain: "geo-game-749fc.firebaseapp.com",
+  databaseURL: "https://geo-game-749fc-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "geo-game-749fc",
+  storageBucket: "geo-game-749fc.firebasestorage.app",
+  messagingSenderId: "868185191965",
+  appId: "1:868185191965:web:b21f640bba7764f5d978f4"
+};
 
 // Опорные точки: города и посёлки с хорошим покрытием Street View.
 // Россия и Беларусь исключены; точки у их границ и в оккупированных районах не используются.
@@ -170,8 +210,8 @@ const SEEDS = [
 [-36.85,174.76],[-41.29,174.78],[-43.53,172.64],[-45.03,168.66],[-45.87,170.5]
 ];
 
-// Защита бесплатного лимита Google (5 000 открытий панорамы в месяц)
-const DAILY_LIMIT = 150;     // открытий панорамы в день на этом устройстве
+// Защита бесплатного лимита Google (5 000 открытий панорамы в месяц на весь сайт)
+const DAILY_LIMIT = 150;     // открытий панорамы в день на весь сайт
 const MONTHLY_FREE = 5000;   // бесплатно у Google в месяц
 
 // ====== СОСТОЯНИЕ ======
@@ -180,30 +220,63 @@ let pano, svService, guessMap, guessMarker, resultMap, resultLayers=[], timerId;
 let game = null;
 const LS = {get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},
             set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Идентификатор этого устройства/вкладки для игры вдвоём
+let PID; try{ PID=sessionStorage.getItem('pid'); if(!PID){PID=Math.random().toString(36).slice(2,10); sessionStorage.setItem('pid',PID);} }catch(e){ PID=Math.random().toString(36).slice(2,10); }
+
+// ====== FIREBASE ======
+let db=null, serverOffset=0;
+try{
+  if(FIREBASE_CONFIG && window.firebase){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db=firebase.database();
+    db.ref('.info/serverTimeOffset').on('value',s=>{serverOffset=s.val()||0;});
+  }
+}catch(e){ console.error(e); db=null; }
+const now = () => Date.now()+serverOffset;
+const INC = () => firebase.database.ServerValue.increment(1);
 
 function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$(id).classList.add('active'); if(id==='sMenu') drawUsage();}
 
-// ====== СЧЁТЧИК ИСПОЛЬЗОВАНИЯ ======
+// ====== ОБЩИЙ СЧЁТЧИК ======
 function pad(n){return String(n).padStart(2,'0');}
-function getUsage(){
-  const d=new Date(), day=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, month=day.slice(0,7);
-  const u=LS.get('usage',{});
+function dayKey(){const d=new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+const stats={dayLoads:0,dayGames:0,monthLoads:0,monthGames:0,ready:false};
+
+function localUsage(){
+  const day=dayKey(), month=day.slice(0,7), u=LS.get('usage',{});
   if(u.month!==month){u.month=month;u.monthLoads=0;u.monthGames=0;}
   if(u.day!==day){u.day=day;u.dayLoads=0;u.dayGames=0;}
   return u;
 }
-function addUsage(field){const u=getUsage(); u[field]=(u[field]||0)+1;
-  if(field==='dayLoads') u.monthLoads=(u.monthLoads||0)+1;
-  if(field==='dayGames') u.monthGames=(u.monthGames||0)+1;
-  LS.set('usage',u);}
+function watchStats(){
+  if(!db){ Object.assign(stats,localUsage(),{ready:true}); drawUsage(); return; }
+  const day=dayKey(), month=day.slice(0,7);
+  db.ref(`stats/days/${day}`).on('value',s=>{const v=s.val()||{}; stats.dayLoads=v.loads||0; stats.dayGames=v.games||0; stats.ready=true; drawUsage();});
+  db.ref(`stats/months/${month}`).on('value',s=>{const v=s.val()||{}; stats.monthLoads=v.loads||0; stats.monthGames=v.games||0; drawUsage();});
+}
+function bump(field){ // field: 'loads' | 'games'
+  const day=dayKey(), month=day.slice(0,7);
+  if(db){ db.ref().update({[`stats/days/${day}/${field}`]:INC(), [`stats/months/${month}/${field}`]:INC()}); return; }
+  const u=localUsage(); const k=field==='loads'?'Loads':'Games';
+  u['day'+k]=(u['day'+k]||0)+1; u['month'+k]=(u['month'+k]||0)+1; LS.set('usage',u);
+  Object.assign(stats,u); drawUsage();
+}
 function drawUsage(){
-  const u=getUsage(), left=Math.max(0,MONTHLY_FREE-u.monthLoads), pct=Math.min(100,u.monthLoads/MONTHLY_FREE*100);
-  $('usageText').innerHTML=`Сегодня: <b>${u.dayGames}</b> игр · открытий панорамы: <b>${u.dayLoads}</b> из ${DAILY_LIMIT}<br>`+
+  if(!$('usageText')) return;
+  const left=Math.max(0,MONTHLY_FREE-stats.monthLoads), pct=Math.min(100,stats.monthLoads/MONTHLY_FREE*100);
+  $('usageText').innerHTML=`Сегодня: <b>${stats.dayGames}</b> игр · открытий панорамы: <b>${stats.dayLoads}</b> из ${DAILY_LIMIT}<br>`+
     `Осталось в месяце: <b>~${left.toLocaleString('ru')}</b> из ${MONTHLY_FREE.toLocaleString('ru')}`;
   $('usageBar').style.width=pct+'%';
   $('usageBar').style.background = pct>80?'var(--bad)':pct>50?'var(--accent2)':'var(--accent)';
-  $('usageNote').textContent='Считается только на этом устройстве. Одно открытие страницы = одна загрузка, раунды и ходьба не тратят лимит.';
+  $('usageNote').textContent = db
+    ? 'Общий счёт для всех устройств. Одно открытие страницы = одна загрузка, раунды и ходьба лимит не тратят.'
+    : 'База не подключена: считается только на этом устройстве.';
+  $('createRoom').disabled = !db; $('joinRoom').disabled = !db;
+  $('createRoom').title = db ? '' : 'Нужна база Firebase';
 }
+function limitReached(){ return !pano && stats.dayLoads>=DAILY_LIMIT; }
 
 // ====== ЗАГРУЗКА GOOGLE ======
 function getKey(){return (GOOGLE_API_KEY && GOOGLE_API_KEY!=="ВСТАВЬТЕ_КЛЮЧ") ? GOOGLE_API_KEY : LS.get('gkey','');}
@@ -237,40 +310,23 @@ function findPano(tries=0){
   });
 }
 
-// ====== ИГРА ======
-$('nameInput').value = LS.get('name','');
-$('startSolo').onclick = startGame;
-$('againBtn').onclick = startGame;
-$('menuBtn').onclick = ()=>show('sMenu');
-
-function startGame(){
-  if(!svService){$('err').textContent='Google ещё загружается, подождите секунду.';return;}
-  if(!pano && getUsage().dayLoads>=DAILY_LIMIT){
-    $('err').textContent=`На сегодня лимит (${DAILY_LIMIT} открытий) исчерпан. Приходите завтра!`; return;}
-  const name = $('nameInput').value.trim()||'Игрок'; LS.set('name',name);
-  addUsage('dayGames');
-  game = {name, rounds:+$('roundsSel').value, move:$('moveSel').value==='move', time:+$('timeSel').value, round:0, results:[]};
-  nextRound();
+// ====== ОБЩЕЕ ДЛЯ ИГРЫ ======
+function readSettings(){ return {rounds:+$('roundsSel').value, move:$('moveSel').value==='move', time:+$('timeSel').value}; }
+function myName(){ const n=$('nameInput').value.trim()||'Игрок'; LS.set('name',n); return n; }
+function canStart(){
+  $('err').textContent='';
+  if(!svService){$('err').textContent='Google ещё загружается, подождите секунду.';return false;}
+  if(limitReached()){$('err').textContent=`На сегодня общий лимит (${DAILY_LIMIT} открытий) исчерпан. Приходите завтра!`;return false;}
+  return true;
 }
-
-async function nextRound(){
-  game.round++;
-  show('sGame');
-  $('hudRound').textContent=`Раунд ${game.round} / ${game.rounds}`;
-  $('hudScore').textContent=`Очки: ${game.results.reduce((a,r)=>a+r.pts,0)}`;
-  $('guessBtn').disabled=true; $('guessBtn').textContent='Поставьте точку на карте';
-  let loc;
-  try{ loc = await findPano(); }catch(e){ alert('Не получилось найти панораму, попробуйте ещё раз.'); show('sMenu'); return; }
-  game.current = loc;
-  // Панорама создаётся один раз на всё время, пока открыта страница (экономия бесплатного лимита)
+// Показ панорамы. Объект панорамы создаётся один раз за открытие страницы (экономия лимита)
+function showPano(loc, move){
   const opts = {pano:loc.pano, pov:{heading:Math.random()*360,pitch:0}, zoom:0,
     addressControl:false, showRoadLabels:false, fullscreenControl:false, motionTracking:false, motionTrackingControl:false,
-    enableCloseButton:false, linksControl:game.move, clickToGo:game.move, panControl:true, zoomControl:true};
-  if(!pano){ pano = new google.maps.StreetViewPanorama($('pano'), opts); addUsage('dayLoads'); }
+    enableCloseButton:false, linksControl:move, clickToGo:move, panControl:true, zoomControl:true};
+  if(!pano){ pano = new google.maps.StreetViewPanorama($('pano'), opts); bump('loads'); }
   else { pano.setOptions(opts); pano.setPano(loc.pano); pano.setPov(opts.pov); pano.setZoom(0); }
   pano.setVisible(true);
-  setupGuessMap();
-  startTimer();
 }
 
 // Общие настройки карт Google: подписи на русском (язык задан при загрузке), без человечка Street View
@@ -280,100 +336,312 @@ const WORLD = {center:{lat:25,lng:10}, zoom:1};
 
 function setupGuessMap(){
   if(!guessMap){
-    // Карта создаётся один раз за открытие страницы (экономия лимита)
     guessMap = new google.maps.Map($('guessMap'), {...MAP_OPTS, ...WORLD, draggableCursor:'crosshair'});
     guessMap.addListener('click',e=>{
+      if(game && game.waiting) return;
       if(guessMarker) guessMarker.setPosition(e.latLng);
       else guessMarker = new google.maps.Marker({position:e.latLng, map:guessMap});
       $('guessBtn').disabled=false; $('guessBtn').textContent='Угадать!';
     });
-    // на телефоне карта увеличивается по нажатию
     $('guessBox').addEventListener('touchstart',()=>$('guessBox').classList.add('big'),{passive:true});
   }
   if(guessMarker){guessMarker.setMap(null);guessMarker=null;}
   guessMap.setCenter(WORLD.center); guessMap.setZoom(WORLD.zoom);
   $('guessBox').classList.remove('big');
+  $('guessBtn').disabled=true; $('guessBtn').textContent='Поставьте точку на карте';
 }
 
-function startTimer(){
+function startTimer(deadline, onExpire){
   clearInterval(timerId);
-  if(!game.time){$('hudTimer').style.display='none';return;}
-  let left=game.time; $('hudTimer').style.display='';
-  const draw=()=>{$('hudTimer').textContent=`⏱ ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;};
-  draw();
-  timerId=setInterval(()=>{left--;draw(); if(left<=0){clearInterval(timerId); submitGuess();}},1000);
+  if(!deadline){$('hudTimer').style.display='none';return;}
+  $('hudTimer').style.display='';
+  const tick=()=>{ const left=Math.max(0,Math.ceil((deadline-now())/1000));
+    $('hudTimer').textContent=`⏱ ${Math.floor(left/60)}:${pad(left%60)}`;
+    if(left<=0){clearInterval(timerId); onExpire();} };
+  tick(); timerId=setInterval(tick,500);
 }
-
-$('guessBtn').onclick = submitGuess;
 
 function distanceKm(a,b){const R=6371,r=Math.PI/180;
   const dLat=(b.lat-a.lat)*r,dLng=(b.lng-a.lng)*r;
   const h=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLng/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));}
 function scoreFor(km){ if(km<0.05) return 5000; return Math.round(5000*Math.exp(-km/2000)); }
-
-function submitGuess(){
-  clearInterval(timerId);
-  const truth={lat:game.current.lat,lng:game.current.lng};
-  let guess=null, km=null, pts=0;
-  if(guessMarker){const ll=guessMarker.getPosition(); guess={lat:ll.lat(),lng:ll.lng()}; km=distanceKm(guess,truth); pts=scoreFor(km);}
-  game.results.push({truth,guess,km,pts});
-  showResult(truth,guess,km,pts);
+function fmtKm(km){ if(km===null||km===undefined) return 'нет ответа'; return km<1?`${Math.round(km*1000)} м`:`${km<100?km.toFixed(1):Math.round(km).toLocaleString('ru')} км`; }
+function currentGuess(truth){
+  if(!guessMarker) return {guess:null,km:null,pts:0};
+  const ll=guessMarker.getPosition(), guess={lat:ll.lat(),lng:ll.lng()}, km=distanceKm(guess,truth);
+  return {guess,km,pts:scoreFor(km)};
 }
 
-function fmtKm(km){ if(km===null) return 'Время вышло — точка не поставлена'; return km<1?`${Math.round(km*1000)} м`:`${km<100?km.toFixed(1):Math.round(km).toLocaleString('ru')} км`; }
-
-function showResult(truth,guess,km,pts){
-  show('sResult');
+// Карта результата: зелёный кружок — правильное место; метки игроков
+function drawResultMap(truth, marks){ // marks: [{pos,color,label}]
   if(!resultMap) resultMap = new google.maps.Map($('resultMap'), {...MAP_OPTS, ...WORLD});
   resultLayers.forEach(o=>o.setMap(null)); resultLayers=[];
-  // зелёный кружок — правильное место, красная метка — ваш ответ
-  resultLayers.push(new google.maps.Marker({position:truth, map:resultMap, title:'Правильное место', zIndex:2,
+  resultLayers.push(new google.maps.Marker({position:truth, map:resultMap, title:'Правильное место', zIndex:3,
     icon:{path:google.maps.SymbolPath.CIRCLE, scale:10, fillColor:'#2fbf71', fillOpacity:1, strokeColor:'#fff', strokeWeight:3}}));
-  if(guess){
-    resultLayers.push(new google.maps.Marker({position:guess, map:resultMap, title:'Ваш ответ'}));
-    resultLayers.push(new google.maps.Polyline({path:[guess,truth], map:resultMap, geodesic:true, strokeOpacity:0,
-      icons:[{icon:{path:'M 0,-1 0,1', strokeOpacity:1, strokeColor:'#222', scale:3}, offset:'0', repeat:'14px'}]}));
-  }
+  const b=new google.maps.LatLngBounds(); b.extend(truth);
+  marks.forEach(m=>{
+    if(!m.pos) return;
+    b.extend(m.pos);
+    resultLayers.push(new google.maps.Marker({position:m.pos, map:resultMap, title:m.title, zIndex:2,
+      label:{text:m.label, color:'#fff', fontWeight:'700'},
+      icon:{path:google.maps.SymbolPath.CIRCLE, scale:12, fillColor:m.color, fillOpacity:1, strokeColor:'#fff', strokeWeight:2}}));
+    resultLayers.push(new google.maps.Polyline({path:[m.pos,truth], map:resultMap, geodesic:true, strokeOpacity:0,
+      icons:[{icon:{path:'M 0,-1 0,1', strokeOpacity:1, strokeColor:m.color, scale:3}, offset:'0', repeat:'14px'}]}));
+  });
   setTimeout(()=>{
-    if(guess){
-      const b=new google.maps.LatLngBounds(); b.extend(guess); b.extend(truth);
-      resultMap.fitBounds(b, 70);
+    if(marks.some(m=>m.pos)){
+      resultMap.fitBounds(b, 80);
       google.maps.event.addListenerOnce(resultMap,'idle',()=>{ if(resultMap.getZoom()>12) resultMap.setZoom(12); });
     } else { resultMap.setCenter(truth); resultMap.setZoom(5); }
   },50);
-  $('resDist').innerHTML = (guess?`Вы ошиблись на <b>${fmtKm(km)}</b>`:fmtKm(null)) +
-    '<div style="font-size:12px;color:var(--muted);margin-top:4px">🟢 правильное место · 📍 ваш ответ</div>';
+}
+
+// ====== ОДИНОЧНАЯ ИГРА ======
+function startSolo(){
+  if(!canStart()) return;
+  leaveRoom(true);
+  game = {mode:'solo', name:myName(), ...readSettings(), round:0, results:[]};
+  bump('games');
+  soloRound();
+}
+
+async function soloRound(){
+  game.round++; game.waiting=false;
+  show('sGame');
+  $('hudOpp').style.display='none';
+  $('hudRound').textContent=`Раунд ${game.round} / ${game.rounds}`;
+  $('hudScore').textContent=`Очки: ${game.results.reduce((a,r)=>a+r.pts,0)}`;
+  setupGuessMap();
+  $('guessBtn').textContent='Ищем место…';
+  let loc;
+  try{ loc = await findPano(); }catch(e){ alert('Не получилось найти панораму, попробуйте ещё раз.'); show('sMenu'); return; }
+  game.current = loc;
+  showPano(loc, game.move);
+  $('guessBtn').textContent='Поставьте точку на карте';
+  startTimer(game.time ? now()+game.time*1000 : 0, soloSubmit);
+}
+
+function soloSubmit(){
+  clearInterval(timerId);
+  const truth={lat:game.current.lat,lng:game.current.lng};
+  const {guess,km,pts}=currentGuess(truth);
+  game.results.push({km,pts});
+  show('sResult');
+  drawResultMap(truth, [{pos:guess, color:'#e8453c', label:'Я', title:'Ваш ответ'}]);
+  $('resDist').innerHTML = (guess?`Вы ошиблись на <b>${fmtKm(km)}</b>`:'Время вышло — точка не поставлена') +
+    '<div style="font-size:12px;color:var(--muted);margin-top:4px">🟢 правильное место · 🔴 ваш ответ</div>';
+  $('resPts').style.display=''; $('resBarWrap').style.display=''; $('resTable').innerHTML='';
   $('resPts').textContent = `+${pts} очков`;
   $('resBar').style.width = (pts/50)+'%';
+  $('nextBtn').disabled=false;
   $('nextBtn').textContent = game.round<game.rounds?'Следующий раунд':'Итоги';
 }
 
-$('nextBtn').onclick = ()=>{ if(game.round<game.rounds) nextRound(); else finish(); };
-
-function finish(){
+function soloFinish(){
   const total=game.results.reduce((a,r)=>a+r.pts,0), max=game.rounds*5000;
   show('sFinal');
   $('finalName').textContent=`${game.name}, вот ваш результат:`;
   $('finalTotal').textContent=`${total.toLocaleString('ru')} / ${max.toLocaleString('ru')}`;
   $('finalTable').innerHTML='<tr><th>Раунд</th><th>Ошибка</th><th>Очки</th></tr>'+
     game.results.map((r,i)=>`<tr><td>${i+1}</td><td>${r.km===null?'—':fmtKm(r.km)}</td><td>${r.pts}</td></tr>`).join('');
-  const recs=LS.get('records',[]);
-  recs.push({name:game.name,total,max,rounds:game.rounds,move:game.move,date:new Date().toLocaleDateString('ru')});
-  recs.sort((a,b)=>b.total/b.max-a.total/a.max);
-  LS.set('records',recs.slice(0,20));
+  saveRecord({name:game.name,total,max,rounds:game.rounds,move:game.move,mode:'solo'});
 }
 
+// ====== ИГРА ВДВОЁМ ======
+let roomRef=null, room=null, isHost=false, shownRound=0, resultFor=0, finalShown=false;
+const COLORS = ['#e8453c','#3d7bf5'];
+
+function players(){ const p=(room&&room.players)||{}; return Object.keys(p).sort((a,b)=>(p[a].joined||0)-(p[b].joined||0)).map(id=>({id,...p[id]})); }
+function totalOf(p, upTo){ let t=0; const g=p.guesses||{}; for(const r in g){ if(+r<=upTo) t+=g[r].pts||0; } return t; }
+
+async function createRoom(){
+  if(!db || !canStart()) return;
+  const name=myName(), settings=readSettings();
+  $('createRoom').disabled=true; $('err').textContent='Готовим комнату и подбираем места…';
+  try{
+    let code, tries=0;
+    do{ code=String(1000+Math.floor(Math.random()*9000)); tries++; }
+    while(tries<20 && (await db.ref('rooms/'+code).get()).exists());
+    const locs=[];
+    for(let i=0;i<settings.rounds;i++) locs.push(await findPano());
+    leaveRoom(true);
+    roomRef=db.ref('rooms/'+code); isHost=true;
+    await roomRef.set({created:firebase.database.ServerValue.TIMESTAMP, host:PID, settings, locs, phase:'lobby', round:0,
+      players:{[PID]:{name, joined:firebase.database.ServerValue.TIMESTAMP}}});
+    enterRoom(code);
+  }catch(e){ console.error(e); $('err').textContent='Не удалось создать комнату. Проверьте интернет.'; }
+  $('createRoom').disabled=false;
+}
+
+async function joinRoom(){
+  if(!db || !canStart()) return;
+  const code=$('codeInput').value.trim();
+  if(!/^\d{4}$/.test(code)){ $('err').textContent='Введите код из 4 цифр.'; return; }
+  try{
+    const s=await db.ref('rooms/'+code).get();
+    const r=s.val();
+    if(!r){ $('err').textContent='Комната с таким кодом не найдена.'; return; }
+    const ids=Object.keys(r.players||{});
+    if(r.phase!=='lobby' && !ids.includes(PID)){ $('err').textContent='В этой комнате игра уже идёт.'; return; }
+    if(ids.length>=2 && !ids.includes(PID)){ $('err').textContent='Комната уже заполнена.'; return; }
+    leaveRoom(true);
+    roomRef=db.ref('rooms/'+code); isHost=(r.host===PID);
+    await roomRef.child('players/'+PID).update({name:myName(), joined:firebase.database.ServerValue.TIMESTAMP});
+    enterRoom(code);
+  }catch(e){ console.error(e); $('err').textContent='Не удалось войти. Проверьте интернет.'; }
+}
+
+function enterRoom(code){
+  shownRound=0; resultFor=0; finalShown=false; $('err').textContent='';
+  $('lobbyCode').textContent=code; show('sLobby');
+  roomRef.on('value', s=>{ room=s.val(); if(!room){ leaveRoom(true); show('sMenu'); $('err').textContent='Комната закрыта.'; return; } onRoom(); });
+}
+
+function leaveRoom(silent){
+  if(roomRef){ roomRef.off();
+    if(room && room.phase==='lobby'){ if(isHost) roomRef.remove(); else roomRef.child('players/'+PID).remove(); }
+  }
+  roomRef=null; room=null; isHost=false;
+  if(game && game.mode==='multi') game=null;
+}
+
+function onRoom(){
+  const ps=players();
+  if(room.phase==='lobby'){ renderLobby(ps); return; }
+  if(room.phase==='final'){ if(!finalShown) multiFinal(ps); return; }
+  // phase === 'play'
+  const r=room.round;
+  const allGuessed = ps.length>0 && ps.every(p=>p.guesses && p.guesses[r]);
+  if(allGuessed){
+    if(resultFor!==r) multiResult(r, ps); else updateReady(r, ps);
+    if(isHost && ps.every(p=>(p.ready||0)>=r)){
+      if(r<room.settings.rounds) roomRef.update({round:r+1, roundStart:firebase.database.ServerValue.TIMESTAMP});
+      else roomRef.update({phase:'final'});
+    }
+  } else if(shownRound!==r){ multiRound(r); }
+  else updateOpp(r, ps);
+}
+
+function renderLobby(ps){
+  const st=room.settings;
+  $('lobbyPlayers').innerHTML = ps.map((p,i)=>`<div><span class="dot" style="background:${COLORS[i]}"></span>${esc(p.name)}${p.id===room.host?' (создатель)':''}${p.id===PID?' — это вы':''}</div>`).join('')
+    + (ps.length<2?'<div style="color:var(--muted)">Ждём второго игрока…</div>':'');
+  $('lobbySettings').textContent = `Раундов: ${st.rounds} · ${st.move?'можно ходить':'без передвижения'} · ${st.time?('время: '+(st.time/60)+' мин'):'без ограничения времени'}`;
+  $('lobbyHint').textContent = isHost ? 'Скажите этот код второму игроку:' : 'Вы в комнате. Ждём, когда создатель начнёт игру.';
+  $('lobbyStart').style.display = isHost ? '' : 'none';
+  $('lobbyStart').disabled = ps.length<2;
+}
+
+function multiRound(r){
+  shownRound=r;
+  if(r===1) bump('games');
+  const st=room.settings, loc=room.locs[r-1];
+  game = {mode:'multi', round:r, rounds:st.rounds, move:st.move, time:st.time, current:loc, waiting:false};
+  show('sGame');
+  $('hudRound').textContent=`Раунд ${r} / ${st.rounds}`;
+  const me=players().find(p=>p.id===PID);
+  $('hudScore').textContent=`Очки: ${me?totalOf(me,r-1):0}`;
+  setupGuessMap();
+  showPano(loc, st.move);
+  updateOpp(r, players());
+  const start = room.roundStart || now();
+  startTimer(st.time ? start+st.time*1000 : 0, multiSubmit);
+}
+
+function updateOpp(r, ps){
+  const op=ps.find(p=>p.id!==PID);
+  $('hudOpp').style.display = op ? '' : 'none';
+  if(op) $('hudOpp').textContent = `${op.name}: ${op.guesses&&op.guesses[r] ? 'ответил ✓' : 'думает…'}`;
+}
+
+function multiSubmit(){
+  if(!game || game.mode!=='multi' || game.waiting) return;
+  clearInterval(timerId);
+  const r=game.round, truth={lat:game.current.lat,lng:game.current.lng};
+  const {guess,km,pts}=currentGuess(truth);
+  game.waiting=true;
+  $('guessBtn').disabled=true; $('guessBtn').textContent='Ответ принят. Ждём соперника…';
+  roomRef.child(`players/${PID}/guesses/${r}`).set(guess?{lat:guess.lat,lng:guess.lng,km,pts}:{none:true,pts:0});
+}
+
+function multiResult(r, ps){
+  resultFor=r; clearInterval(timerId);
+  const loc=room.locs[r-1], truth={lat:loc.lat,lng:loc.lng};
+  show('sResult');
+  drawResultMap(truth, ps.map((p,i)=>{ const g=p.guesses[r];
+    return {pos:g.none?null:{lat:g.lat,lng:g.lng}, color:COLORS[i], label:(p.name||'?')[0].toUpperCase(), title:p.name}; }));
+  const legend = ps.map((p,i)=>`<span class="dot" style="background:${COLORS[i]}"></span>${esc(p.name)}`).join(' &nbsp; ');
+  $('resDist').innerHTML = `<b>Раунд ${r} из ${room.settings.rounds}</b><div style="font-size:12px;color:var(--muted);margin-top:4px">🟢 правильное место &nbsp; ${legend}</div>`;
+  $('resPts').style.display='none'; $('resBarWrap').style.display='none';
+  $('resTable').innerHTML = '<table><tr><th>Игрок</th><th>Ошибка</th><th>Очки</th><th>Всего</th></tr>' +
+    ps.map((p,i)=>{const g=p.guesses[r]; return `<tr><td><span class="dot" style="background:${COLORS[i]}"></span>${esc(p.name)}</td><td>${g.none?'—':fmtKm(g.km)}</td><td>+${g.pts}</td><td><b>${totalOf(p,r)}</b></td></tr>`;}).join('') + '</table>';
+  $('nextBtn').disabled=false;
+  $('nextBtn').textContent = r<room.settings.rounds ? 'Следующий раунд' : 'Итоги';
+  updateReady(r, ps);
+}
+
+function updateReady(r, ps){
+  const me=ps.find(p=>p.id===PID);
+  if(me && (me.ready||0)>=r){ $('nextBtn').disabled=true; $('nextBtn').textContent='Ждём соперника…'; }
+}
+
+function multiFinal(ps){
+  finalShown=true; clearInterval(timerId);
+  const n=room.settings.rounds, max=n*5000;
+  const rows=ps.map((p,i)=>({p,i,total:totalOf(p,n)})).sort((a,b)=>b.total-a.total);
+  show('sFinal');
+  const tie = rows.length>1 && rows[0].total===rows[1].total;
+  $('finalName').textContent = tie ? 'Ничья!' : `Победил(а): ${rows[0].p.name} 🏆`;
+  $('finalTotal').textContent = rows.map(x=>x.total.toLocaleString('ru')).join(' : ');
+  let head='<tr><th>Раунд</th>'+ps.map((p,i)=>`<th><span class="dot" style="background:${COLORS[i]}"></span>${esc(p.name)}</th>`).join('')+'</tr>';
+  let body='';
+  for(let r=1;r<=n;r++) body+=`<tr><td>${r}</td>`+ps.map(p=>{const g=(p.guesses||{})[r]; return `<td>${g?g.pts:0}</td>`;}).join('')+'</tr>';
+  body+='<tr><td><b>Всего</b></td>'+ps.map(p=>`<td><b>${totalOf(p,n)}</b></td>`).join('')+'</tr>';
+  $('finalTable').innerHTML=head+body;
+  const me=ps.find(p=>p.id===PID);
+  if(me) saveRecord({name:me.name,total:totalOf(me,n),max,rounds:n,move:room.settings.move,mode:'duo'});
+}
+
+$('lobbyStart').onclick=()=>{ if(isHost && players().length>=2) roomRef.update({phase:'play', round:1, roundStart:firebase.database.ServerValue.TIMESTAMP}); };
+$('lobbyLeave').onclick=()=>{ leaveRoom(); show('sMenu'); };
+
 // ====== РЕКОРДЫ ======
-$('showRecords').onclick=()=>{
-  const recs=LS.get('records',[]);
+function saveRecord(rec){
+  rec.date=new Date().toLocaleDateString('ru');
+  if(db){ db.ref('records').push({...rec, ts:firebase.database.ServerValue.TIMESTAMP}); return; }
+  const recs=LS.get('records',[]); recs.push(rec);
+  recs.sort((a,b)=>b.total/b.max-a.total/a.max); LS.set('records',recs.slice(0,20));
+}
+async function showRecords(){
+  let recs=[];
+  $('recHint').textContent = db ? 'Лучшие игры на всех устройствах.' : 'Лучшие игры на этом устройстве.';
+  if(db){ try{ const s=await db.ref('records').orderByChild('total').limitToLast(200).get(); s.forEach(c=>{recs.push(c.val());}); }catch(e){} }
+  else recs=LS.get('records',[]);
+  recs.sort((a,b)=>b.total/b.max-a.total/a.max); recs=recs.slice(0,20);
   $('recTable').innerHTML = recs.length? '<tr><th>Имя</th><th>Очки</th><th>Раунды</th><th>Дата</th></tr>'+
-    recs.map(r=>`<tr><td>${r.name.replace(/</g,'&lt;')}</td><td>${r.total.toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${r.date}</td></tr>`).join('')
+    recs.map(r=>`<tr><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}</td><td>${r.total.toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
     : '<tr><td>Пока нет сыгранных игр</td></tr>';
   show('sRecords');
-};
-$('recBack').onclick=()=>show('sMenu');
+}
 
+// ====== КНОПКИ ======
+$('nameInput').value = LS.get('name','');
+$('startSolo').onclick = startSolo;
+$('createRoom').onclick = createRoom;
+$('joinRoom').onclick = joinRoom;
+$('codeInput').addEventListener('keydown',e=>{ if(e.key==='Enter') joinRoom(); });
+$('guessBtn').onclick = ()=>{ if(game && game.mode==='multi') multiSubmit(); else soloSubmit(); };
+$('nextBtn').onclick = ()=>{
+  if(game && game.mode==='multi'){ if(roomRef){ roomRef.child(`players/${PID}/ready`).set(room.round); $('nextBtn').disabled=true; $('nextBtn').textContent='Ждём соперника…'; } return; }
+  if(game.round<game.rounds) soloRound(); else soloFinish();
+};
+$('againBtn').onclick = ()=>{ if(game && game.mode==='solo') startSolo(); else { leaveRoom(); show('sMenu'); } };
+$('menuBtn').onclick = ()=>{ leaveRoom(); show('sMenu'); };
+$('showRecords').onclick = showRecords;
+$('recBack').onclick = ()=>show('sMenu');
+
+watchStats();
 loadGoogle();
 </script>
 </body>
