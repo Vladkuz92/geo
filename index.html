@@ -39,6 +39,13 @@ label:first-child{margin-top:0}
 #swapBox{position:absolute;top:60px;left:50%;transform:translateX(-50%);z-index:6;background:var(--panel);padding:14px 18px;border-radius:14px;text-align:center;width:min(360px,90vw);box-shadow:0 10px 30px #0008}
 #swapBox .row{margin-top:10px}
 .chip.rush{background:#e05656dd}
+#oppAlert{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);transform-origin:50% 0;z-index:7;display:none;pointer-events:none;
+  background:#e05656ee;color:#fff;padding:20px 30px;border-radius:18px;text-align:center;font-weight:800;font-size:22px;
+  box-shadow:0 10px 40px #000a;transition:top .6s ease,transform .6s ease}
+#oppAlert.top{top:10px;transform:translate(-50%,0) scale(.55)}
+#oppAlertTime{font-size:48px;margin-top:4px}
+#oppAlert.blink #oppAlertTime{animation:blink .6s steps(2) infinite}
+@keyframes blink{50%{opacity:.25}}
 .chip{background:#000a;padding:8px 12px;border-radius:10px;font-weight:600}
 #guessBox{position:absolute;right:12px;bottom:12px;z-index:5;width:300px;height:220px;display:flex;flex-direction:column;gap:6px;transition:width .2s,height .2s}
 #guessBox:hover,#guessBox.big{width:min(600px,92vw);height:min(440px,60vh)}
@@ -135,6 +142,7 @@ th{color:var(--muted);font-weight:500}
     <div id="swapText"></div>
     <div class="row" id="swapBtns"><button id="swapYes">Согласен</button><button class="secondary" id="swapNo">Нет</button></div>
   </div>
+  <div id="oppAlert"><div id="oppAlertText"></div><div id="oppAlertTime"></div></div>
   <div id="guessBox">
     <div id="guessMap"></div>
     <button id="guessBtn" disabled>Поставьте точку на карте</button>
@@ -679,7 +687,8 @@ function multiRound(r){
   shownRound=r;
   if(!gamesCounted){ bump('games'); gamesCounted=true; }
   const st=room.settings, loc=room.locs[r-1];
-  game = {mode:'multi', round:r, rounds:st.rounds, move:st.move, time:st.time, current:loc, waiting:false, rushOn:false};
+  game = {mode:'multi', round:r, rounds:st.rounds, move:st.move, time:st.time, current:loc, waiting:false, oppAlerted:false};
+  hideOppAlert();
   show('sGame');
   $('hudTimer').classList.remove('rush');
   $('hudRound').textContent=`Раунд ${r} / ${st.rounds}${st.level==='hard'?' 🔥':''}`;
@@ -696,20 +705,54 @@ function updateOpp(r, ps){
   const op=ps.find(p=>p.id!==PID);
   $('hudOpp').style.display = op ? '' : 'none';
   if(op) $('hudOpp').textContent = `${op.name}: ${op.guesses&&op.guesses[r] ? 'ответил ✓' : 'думает…'}`;
-  // 30 секунд после ответа соперника
+  // Соперник ответил: уведомление по центру, звук, вибрация и (если включено) 30 секунд на ответ
   const og = op && op.guesses && op.guesses[r];
-  if(og && room.settings.rush && game && !game.waiting && !game.rushOn){
-    game.rushOn=true;
-    const at = og.at || now();
-    const roundEnd = room.settings.time ? (room.roundStart||now()) + room.settings.time*1000 : Infinity;
-    $('hudTimer').classList.add('rush');
-    startTimer(Math.min(roundEnd, at+30000), multiSubmit);
+  if(og && game && !game.waiting && !game.oppAlerted){
+    game.oppAlerted=true;
+    let deadline=0;
+    if(room.settings.rush){
+      const at = og.at || now();
+      const roundEnd = room.settings.time ? (room.roundStart||now()) + room.settings.time*1000 : Infinity;
+      deadline = Math.min(roundEnd, at+30000);
+      $('hudTimer').classList.add('rush');
+      startTimer(deadline, multiSubmit);
+    }
+    showOppAlert(op.name, deadline);
   }
+}
+
+// ---- Уведомление «соперник ответил» ----
+let alertTimer=null, audioCtx=null;
+document.addEventListener('pointerdown', ()=>{ try{ audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)(); audioCtx.resume(); }catch(e){} });
+function beep(){
+  try{ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); audioCtx.resume();
+    [[880,0],[1175,0.18]].forEach(([f,t])=>{ const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type='sine'; o.frequency.value=f; o.connect(g); g.connect(audioCtx.destination);
+      const s=audioCtx.currentTime+t; g.gain.setValueAtTime(0.0001,s); g.gain.exponentialRampToValueAtTime(0.35,s+0.02); g.gain.exponentialRampToValueAtTime(0.0001,s+0.16);
+      o.start(s); o.stop(s+0.18); });
+  }catch(e){}
+}
+function hideOppAlert(){ clearInterval(alertTimer); alertTimer=null; const a=$('oppAlert'); a.style.display='none'; a.classList.remove('top','blink'); }
+function showOppAlert(name, deadline){
+  hideOppAlert();
+  const a=$('oppAlert');
+  $('oppAlertText').textContent = `${name} ответил!` + (deadline ? ' У вас 30 секунд' : '');
+  $('oppAlertTime').style.display = deadline ? '' : 'none';
+  a.style.display='block';
+  beep();
+  try{ if(navigator.vibrate) navigator.vibrate([200,100,200]); }catch(e){}
+  if(!deadline){ setTimeout(()=>{ if(!alertTimer) hideOppAlert(); }, 2500); return; }
+  const tick=()=>{ const left=Math.max(0,Math.ceil((deadline-now())/1000));
+    $('oppAlertTime').textContent=`0:${pad(left)}`;
+    a.classList.toggle('blink', left<=10);
+    if(left<=0 || !game || game.waiting) hideOppAlert(); };
+  tick(); alertTimer=setInterval(tick,250);
+  setTimeout(()=>a.classList.add('top'), 2000);
 }
 
 function multiSubmit(){
   if(!game || game.mode!=='multi' || game.waiting) return;
-  clearInterval(timerId);
+  clearInterval(timerId); hideOppAlert();
   const r=game.round, truth={lat:game.current.lat,lng:game.current.lng};
   const {guess,km,pts}=currentGuess(truth);
   game.waiting=true;
@@ -720,7 +763,7 @@ function multiSubmit(){
 }
 
 function multiResult(r, ps){
-  resultFor=r; clearInterval(timerId);
+  resultFor=r; clearInterval(timerId); hideOppAlert();
   const loc=room.locs[r-1], truth={lat:loc.lat,lng:loc.lng};
   show('sResult');
   drawResultMap(truth, ps.map((p,i)=>{ const g=p.guesses[r];
