@@ -67,6 +67,16 @@ th{color:var(--muted);font-weight:500}
 #usage b{color:var(--text)}
 #usageBar{background:var(--accent)}
 #usageNote{font-size:12px}
+.menuWrap{display:flex;gap:20px;align-items:flex-start;justify-content:center;min-height:100%;padding:16px;flex-wrap:wrap}
+.menuWrap .card{flex:0 1 460px}
+#recPanel{flex:0 1 380px;max-width:460px;width:100%;padding:20px;max-height:calc(100vh - 32px);overflow:auto;position:sticky;top:16px}
+#recPanel h2{margin:0 0 10px;font-size:20px}
+.tabs{display:flex;gap:6px;margin-bottom:6px}
+.tabs button{flex:1;padding:8px 10px;font-size:14px;background:#2a3a4b;color:var(--text)}
+.tabs button.on{background:var(--accent2);color:#231}
+#recTable td:first-child{color:var(--muted);width:24px}
+#recTable tr.top1 td{color:var(--accent2);font-weight:700}
+@media (max-width:900px){.menuWrap{flex-direction:column;align-items:center}.menuWrap>.card{flex:none}#recPanel{order:2;flex:none;max-height:none;position:static}}
 @media (max-width:600px){#guessBox{width:46vw;height:30vh}#guessBox.big{width:94vw;height:55vh}}
 </style>
 </head>
@@ -82,7 +92,14 @@ th{color:var(--muted);font-weight:500}
 </div></div></section>
 
 <!-- Меню -->
-<section id="sMenu" class="screen"><div class="center"><div class="card">
+<section id="sMenu" class="screen"><div class="menuWrap">
+<aside class="card" id="recPanel">
+  <h2>🏆 Рекорды</h2>
+  <div class="tabs"><button id="recTabAll" class="on">Все</button><button id="recTabHard">🔥 Сложный</button></div>
+  <table id="recTable"></table>
+  <p id="recHint" style="font-size:12px;margin:10px 0 0"></p>
+</aside>
+<div class="card">
   <label>Ваше имя</label>
   <input id="nameInput" maxlength="20" placeholder="Например: Папа">
   <label>Раундов</label>
@@ -104,7 +121,6 @@ th{color:var(--muted);font-weight:500}
     <input id="codeInput" maxlength="4" inputmode="numeric" placeholder="0000">
     <button class="secondary" id="joinRoom">Войти</button>
   </div>
-  <div class="row"><button class="secondary" id="showRecords">Рекорды</button></div>
   <div id="usage">
     <div id="usageText"></div>
     <div class="bar"><div id="usageBar"></div></div>
@@ -168,14 +184,6 @@ th{color:var(--muted);font-weight:500}
   <div class="total" id="finalTotal"></div>
   <table id="finalTable"></table>
   <div class="row"><button id="againBtn">Ещё раз</button><button class="secondary" id="menuBtn">В меню</button></div>
-</div></div></section>
-
-<!-- Рекорды -->
-<section id="sRecords" class="screen"><div class="center"><div class="card">
-  <h1>🏆 Рекорды</h1>
-  <p id="recHint"></p>
-  <table id="recTable"></table>
-  <div class="row"><button class="secondary" id="recBack">Назад</button></div>
 </div></div></section>
 
 <script>
@@ -808,19 +816,24 @@ function saveRecord(rec){
   rec.date=new Date().toLocaleDateString('ru');
   if(db){ db.ref('records').push({...rec, ts:firebase.database.ServerValue.TIMESTAMP}); return; }
   const recs=LS.get('records',[]); recs.push(rec);
-  recs.sort((a,b)=>b.total/b.max-a.total/a.max); LS.set('records',recs.slice(0,20));
+  recs.sort((a,b)=>b.total/b.max-a.total/a.max); LS.set('records',recs.slice(0,20)); allRecs=LS.get('records',[]); drawRecords();
 }
-async function showRecords(){
-  let recs=[];
-  $('recHint').textContent = db ? 'Лучшие игры на всех устройствах.' : 'Лучшие игры на этом устройстве.';
-  if(db){ try{ const s=await db.ref('records').orderByChild('total').limitToLast(200).get(); s.forEach(c=>{recs.push(c.val());}); }catch(e){} }
-  else recs=LS.get('records',[]);
-  recs.sort((a,b)=>b.total/b.max-a.total/a.max); recs=recs.slice(0,20);
-  $('recTable').innerHTML = recs.length? '<tr><th>Имя</th><th>Очки</th><th>Раунды</th><th>Дата</th></tr>'+
-    recs.map(r=>`<tr><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}${r.level==='hard'?' 🔥':''}</td><td>${r.total.toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
-    : '<tr><td>Пока нет сыгранных игр</td></tr>';
-  show('sRecords');
+let allRecs=[], recTab='hard'==LS.get('recTab','all')?'hard':'all';
+function drawRecords(){
+  $('recTabAll').classList.toggle('on',recTab==='all'); $('recTabHard').classList.toggle('on',recTab==='hard');
+  let recs=allRecs.filter(r=>r && r.max && (recTab==='all' || r.level==='hard'));
+  recs.sort((a,b)=>b.total/b.max-a.total/a.max); recs=recs.slice(0,10);
+  $('recTable').innerHTML = recs.length? '<tr><th>#</th><th>Имя</th><th>Очки</th><th>Раунды</th><th>Дата</th></tr>'+
+    recs.map((r,i)=>`<tr class="${i===0?'top1':''}"><td>${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}${r.level==='hard'?' 🔥':''}</td><td>${Number(r.total).toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
+    : `<tr><td colspan="5">${recTab==='hard'?'На сложном уровне пока никто не играл':'Пока нет сыгранных игр'}</td></tr>`;
 }
+function watchRecords(){
+  $('recHint').textContent = db ? 'Топ‑10 по всем устройствам, обновляется сам. 👥 — вдвоём, 🔥 — сложный.' : 'Лучшие игры на этом устройстве.';
+  if(db){ db.ref('records').orderByChild('total').limitToLast(300).on('value',s=>{ allRecs=[]; s.forEach(c=>{allRecs.push(c.val());}); drawRecords(); }, ()=>drawRecords()); }
+  else { allRecs=LS.get('records',[]); }
+  drawRecords();
+}
+function setRecTab(t){ recTab=t; LS.set('recTab',t); drawRecords(); }
 
 // ====== КНОПКИ ======
 $('nameInput').value = LS.get('name','');
@@ -835,10 +848,11 @@ $('nextBtn').onclick = ()=>{
 };
 $('againBtn').onclick = ()=>{ if(game && game.mode==='solo') startSolo(); else { leaveRoom(); show('sMenu'); } };
 $('menuBtn').onclick = ()=>{ leaveRoom(); show('sMenu'); };
-$('showRecords').onclick = showRecords;
-$('recBack').onclick = ()=>show('sMenu');
+$('recTabAll').onclick = ()=>setRecTab('all');
+$('recTabHard').onclick = ()=>setRecTab('hard');
 
 watchStats();
+watchRecords();
 loadGoogle();
 </script>
 </body>
