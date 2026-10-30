@@ -4,8 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГеоУгадайка</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 :root{--bg:#0f1720;--panel:#17222e;--text:#e8eef4;--muted:#93a4b5;--accent:#2fbf71;--accent2:#f5b83d;--bad:#e05656}
 *{box-sizing:border-box}
@@ -178,7 +176,7 @@ const MONTHLY_FREE = 5000;   // бесплатно у Google в месяц
 
 // ====== СОСТОЯНИЕ ======
 const $ = id => document.getElementById(id);
-let pano, svService, guessMap, guessMarker, resultMap, timerId;
+let pano, svService, guessMap, guessMarker, resultMap, resultLayers=[], timerId;
 let game = null;
 const LS = {get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},
             set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
@@ -275,21 +273,26 @@ async function nextRound(){
   startTimer();
 }
 
+// Общие настройки карт Google: подписи на русском (язык задан при загрузке), без человечка Street View
+const MAP_OPTS = {streetViewControl:false, mapTypeControl:false, fullscreenControl:false, rotateControl:false,
+  clickableIcons:false, gestureHandling:'greedy', minZoom:1};
+const WORLD = {center:{lat:25,lng:10}, zoom:1};
+
 function setupGuessMap(){
   if(!guessMap){
-    guessMap = L.map('guessMap',{worldCopyJump:true,attributionControl:true}).setView([25,10],1);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(guessMap);
-    guessMap.on('click',e=>{
-      if(guessMarker) guessMarker.setLatLng(e.latlng); else guessMarker=L.marker(e.latlng).addTo(guessMap);
+    // Карта создаётся один раз за открытие страницы (экономия лимита)
+    guessMap = new google.maps.Map($('guessMap'), {...MAP_OPTS, ...WORLD, draggableCursor:'crosshair'});
+    guessMap.addListener('click',e=>{
+      if(guessMarker) guessMarker.setPosition(e.latLng);
+      else guessMarker = new google.maps.Marker({position:e.latLng, map:guessMap});
       $('guessBtn').disabled=false; $('guessBtn').textContent='Угадать!';
     });
     // на телефоне карта увеличивается по нажатию
     $('guessBox').addEventListener('touchstart',()=>$('guessBox').classList.add('big'),{passive:true});
   }
-  if(guessMarker){guessMap.removeLayer(guessMarker);guessMarker=null;}
-  guessMap.setView([25,10],1);
+  if(guessMarker){guessMarker.setMap(null);guessMarker=null;}
+  guessMap.setCenter(WORLD.center); guessMap.setZoom(WORLD.zoom);
   $('guessBox').classList.remove('big');
-  setTimeout(()=>guessMap.invalidateSize(),50);
 }
 
 function startTimer(){
@@ -313,7 +316,7 @@ function submitGuess(){
   clearInterval(timerId);
   const truth={lat:game.current.lat,lng:game.current.lng};
   let guess=null, km=null, pts=0;
-  if(guessMarker){const ll=guessMarker.getLatLng(); guess={lat:ll.lat,lng:ll.lng}; km=distanceKm(guess,truth); pts=scoreFor(km);}
+  if(guessMarker){const ll=guessMarker.getPosition(); guess={lat:ll.lat(),lng:ll.lng()}; km=distanceKm(guess,truth); pts=scoreFor(km);}
   game.results.push({truth,guess,km,pts});
   showResult(truth,guess,km,pts);
 }
@@ -322,22 +325,25 @@ function fmtKm(km){ if(km===null) return 'Время вышло — точка �
 
 function showResult(truth,guess,km,pts){
   show('sResult');
-  if(!resultMap){
-    resultMap=L.map('resultMap',{worldCopyJump:true});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(resultMap);
+  if(!resultMap) resultMap = new google.maps.Map($('resultMap'), {...MAP_OPTS, ...WORLD});
+  resultLayers.forEach(o=>o.setMap(null)); resultLayers=[];
+  // зелёный кружок — правильное место, красная метка — ваш ответ
+  resultLayers.push(new google.maps.Marker({position:truth, map:resultMap, title:'Правильное место', zIndex:2,
+    icon:{path:google.maps.SymbolPath.CIRCLE, scale:10, fillColor:'#2fbf71', fillOpacity:1, strokeColor:'#fff', strokeWeight:3}}));
+  if(guess){
+    resultLayers.push(new google.maps.Marker({position:guess, map:resultMap, title:'Ваш ответ'}));
+    resultLayers.push(new google.maps.Polyline({path:[guess,truth], map:resultMap, geodesic:true, strokeOpacity:0,
+      icons:[{icon:{path:'M 0,-1 0,1', strokeOpacity:1, strokeColor:'#222', scale:3}, offset:'0', repeat:'14px'}]}));
   }
-  if(resultMap._layersGroup) resultMap.removeLayer(resultMap._layersGroup);
-  const g=L.layerGroup().addTo(resultMap); resultMap._layersGroup=g;
-  const flag=L.divIcon({html:'🚩',className:'',iconSize:[30,30],iconAnchor:[6,28]});
-  L.marker([truth.lat,truth.lng],{icon:flag}).addTo(g);
   setTimeout(()=>{
-    resultMap.invalidateSize();
-    if(guess){ L.marker([guess.lat,guess.lng]).addTo(g);
-      L.polyline([[guess.lat,guess.lng],[truth.lat,truth.lng]],{dashArray:'6 8',color:'#222'}).addTo(g);
-      resultMap.fitBounds(L.latLngBounds([[guess.lat,guess.lng],[truth.lat,truth.lng]]),{padding:[60,60],maxZoom:12});
-    } else resultMap.setView([truth.lat,truth.lng],5);
+    if(guess){
+      const b=new google.maps.LatLngBounds(); b.extend(guess); b.extend(truth);
+      resultMap.fitBounds(b, 70);
+      google.maps.event.addListenerOnce(resultMap,'idle',()=>{ if(resultMap.getZoom()>12) resultMap.setZoom(12); });
+    } else { resultMap.setCenter(truth); resultMap.setZoom(5); }
   },50);
-  $('resDist').textContent = guess?`Вы ошиблись на ${fmtKm(km)}`:fmtKm(null);
+  $('resDist').innerHTML = (guess?`Вы ошиблись на <b>${fmtKm(km)}</b>`:fmtKm(null)) +
+    '<div style="font-size:12px;color:var(--muted);margin-top:4px">🟢 правильное место · 📍 ваш ответ</div>';
   $('resPts').textContent = `+${pts} очков`;
   $('resBar').style.width = (pts/50)+'%';
   $('nextBtn').textContent = game.round<game.rounds?'Следующий раунд':'Итоги';
