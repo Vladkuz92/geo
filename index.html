@@ -48,7 +48,10 @@ label:first-child{margin-top:0}
 @keyframes blink{50%{opacity:.25}}
 .chip{background:#000a;padding:8px 12px;border-radius:10px;font-weight:600}
 #guessBox{position:absolute;right:12px;bottom:12px;z-index:5;width:300px;height:220px;display:flex;flex-direction:column;gap:6px;transition:width .2s,height .2s}
-#guessBox:hover,#guessBox.big{width:min(600px,92vw);height:min(440px,60vh)}
+@media (hover:hover){#guessBox:hover{width:min(600px,92vw);height:min(440px,60vh)}}
+#guessBox.big{width:min(600px,92vw);height:min(440px,60vh)}
+#mapMin{display:none;position:absolute;top:6px;right:6px;z-index:2;padding:8px 12px;font-size:15px;line-height:1;background:#0f1720e6;color:#fff;border:1px solid #fff4}
+#guessBox.big #mapMin{display:block}
 #guessMap{flex:1;border-radius:12px;border:2px solid #fff3}
 #guessBtn{width:100%}
 #resultMap{position:absolute;inset:0}
@@ -95,7 +98,7 @@ th{color:var(--muted);font-weight:500}
 <section id="sMenu" class="screen"><div class="menuWrap">
 <aside class="card" id="recPanel">
   <h2>🏆 Рекорды</h2>
-  <div class="tabs"><button id="recTabAll" class="on">Все</button><button id="recTabHard">🔥 Сложный</button></div>
+  <div class="tabs"><button id="recTabEasy" class="on">Лёгкий</button><button id="recTabHard">🔥 Сложный</button></div>
   <table id="recTable"></table>
   <p id="recHint" style="font-size:12px;margin:10px 0 0"></p>
 </aside>
@@ -160,6 +163,7 @@ th{color:var(--muted);font-weight:500}
   </div>
   <div id="oppAlert"><div id="oppAlertText"></div><div id="oppAlertTime"></div></div>
   <div id="guessBox">
+    <button id="mapMin" title="Свернуть карту">▾ Свернуть</button>
     <div id="guessMap"></div>
     <button id="guessBtn" disabled>Поставьте точку на карте</button>
   </div>
@@ -455,7 +459,9 @@ function setupGuessMap(){
       else guessMarker = new google.maps.Marker({position:e.latLng, map:guessMap});
       $('guessBtn').disabled=false; $('guessBtn').textContent='Угадать!';
     });
-    $('guessBox').addEventListener('touchstart',()=>$('guessBox').classList.add('big'),{passive:true});
+    $('guessBox').addEventListener('touchstart',e=>{ if(e.target.id!=='mapMin') $('guessBox').classList.add('big'); },{passive:true});
+    $('mapMin').onclick=e=>{ e.stopPropagation(); $('guessBox').classList.remove('big'); };
+    $('pano').addEventListener('touchstart',()=>$('guessBox').classList.remove('big'),{passive:true});
   }
   if(guessMarker){guessMarker.setMap(null);guessMarker=null;}
   guessMap.setCenter(WORLD.center); guessMap.setZoom(WORLD.zoom);
@@ -818,17 +824,17 @@ function saveRecord(rec){
   const recs=LS.get('records',[]); recs.push(rec);
   recs.sort((a,b)=>b.total/b.max-a.total/a.max); LS.set('records',recs.slice(0,20)); allRecs=LS.get('records',[]); drawRecords();
 }
-let allRecs=[], recTab='hard'==LS.get('recTab','all')?'hard':'all';
+let allRecs=[], recTab=LS.get('recTab','easy')==='hard'?'hard':'easy';
 function drawRecords(){
-  $('recTabAll').classList.toggle('on',recTab==='all'); $('recTabHard').classList.toggle('on',recTab==='hard');
-  let recs=allRecs.filter(r=>r && r.max && (recTab==='all' || r.level==='hard'));
+  $('recTabEasy').classList.toggle('on',recTab==='easy'); $('recTabHard').classList.toggle('on',recTab==='hard');
+  let recs=allRecs.filter(r=>r && r.max && (recTab==='hard' ? r.level==='hard' : r.level!=='hard'));
   recs.sort((a,b)=>b.total/b.max-a.total/a.max); recs=recs.slice(0,10);
   $('recTable').innerHTML = recs.length? '<tr><th>#</th><th>Имя</th><th>Очки</th><th>Раунды</th><th>Дата</th></tr>'+
-    recs.map((r,i)=>`<tr class="${i===0?'top1':''}"><td>${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}${r.level==='hard'?' 🔥':''}</td><td>${Number(r.total).toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
-    : `<tr><td colspan="5">${recTab==='hard'?'На сложном уровне пока никто не играл':'Пока нет сыгранных игр'}</td></tr>`;
+    recs.map((r,i)=>`<tr class="${i===0?'top1':''}"><td>${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td><td>${esc(r.name)}${r.mode==='duo'?' 👥':''}</td><td>${Number(r.total).toLocaleString('ru')}</td><td>${r.rounds}${r.move?'':' 🚫🚶'}</td><td>${esc(r.date||'')}</td></tr>`).join('')
+    : `<tr><td colspan="5">${recTab==='hard'?'На сложном уровне пока никто не играл':'На лёгком уровне пока никто не играл'}</td></tr>`;
 }
 function watchRecords(){
-  $('recHint').textContent = db ? 'Топ‑10 по всем устройствам, обновляется сам. 👥 — вдвоём, 🔥 — сложный.' : 'Лучшие игры на этом устройстве.';
+  $('recHint').textContent = db ? 'Топ‑10 по всем устройствам, обновляется сам. 👥 — игра вдвоём.' : 'Лучшие игры на этом устройстве.';
   if(db){ db.ref('records').orderByChild('total').limitToLast(300).on('value',s=>{ allRecs=[]; s.forEach(c=>{allRecs.push(c.val());}); drawRecords(); }, ()=>drawRecords()); }
   else { allRecs=LS.get('records',[]); }
   drawRecords();
@@ -848,7 +854,7 @@ $('nextBtn').onclick = ()=>{
 };
 $('againBtn').onclick = ()=>{ if(game && game.mode==='solo') startSolo(); else { leaveRoom(); show('sMenu'); } };
 $('menuBtn').onclick = ()=>{ leaveRoom(); show('sMenu'); };
-$('recTabAll').onclick = ()=>setRecTab('all');
+$('recTabEasy').onclick = ()=>setRecTab('easy');
 $('recTabHard').onclick = ()=>setRecTab('hard');
 
 watchStats();
