@@ -80,7 +80,12 @@ th{color:var(--muted);font-weight:500}
 #recTable td:first-child{color:var(--muted);width:24px}
 #recTable tr.top1 td{color:var(--accent2);font-weight:700}
 @media (max-width:900px){.menuWrap{flex-direction:column;align-items:center}.menuWrap>.card{flex:none}#recPanel{order:2;flex:none;max-height:none;position:static}}
-@media (max-width:600px){#guessBox{width:46vw;height:30vh}#guessBox.big{width:94vw;height:55vh}}
+@media (max-width:600px){
+  #guessBox{width:28vw;min-width:120px;height:auto;right:8px;bottom:8px;gap:4px}
+  #guessBox:not(.big) #guessMap{flex:none;height:15vh;min-height:90px}
+  #guessBox:not(.big) #guessBtn{padding:7px 4px;font-size:12px;line-height:1.2}
+  #guessBox.big{width:94vw;height:55vh}
+}
 </style>
 </head>
 <body>
