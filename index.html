@@ -537,7 +537,7 @@ async function soloRound(){
 // Найти и показать место в одиночной игре (и при нажатии «Другое место»)
 async function soloNewPlace(){
   game.searching=true; clearInterval(timerId);
-  $('skipBtn').style.display=''; $('skipBtn').disabled=true;
+  $('skipBtn').style.display='none';   // «Другое место» только в игре вдвоём
   setupGuessMap();
   $('guessBtn').textContent='Ищем место…';
   let loc;
@@ -545,7 +545,6 @@ async function soloNewPlace(){
   game.current = loc; game.searching=false;
   showPano(loc, game.move);
   $('guessBtn').textContent='Поставьте точку на карте';
-  $('skipBtn').disabled=false; $('skipBtn').textContent='🔄 Другое место';
   startTimer(game.time ? now()+game.time*1000 : 0, soloSubmit);
 }
 
@@ -672,7 +671,7 @@ function updateSwapUI(){
 }
 async function skipPlace(){
   if(!game || game.waiting || game.searching) return;
-  if(game.mode==='solo'){ await soloNewPlace(); return; }
+  if(game.mode==='solo') return;   // в одиночной игре место не меняется
   if(!roomRef || !room || room.swap || anyGuessed(game.round)) return;
   game.searching=true; updateSwapUI();
   const r=game.round, me=players().find(p=>p.id===PID);
